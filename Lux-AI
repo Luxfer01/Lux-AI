@@ -1,9 +1,11 @@
 // ==UserScript==
-// @name         LUX Starr Framework v14 (OpenRouter • Encrypted Key • Creative Booster • Kill-Switch • All-Model Compatible • Punctuation Fixes • No-Family Excuses • ConeID Access Gate)
+// @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • All-Model Compatible • Punctuation Fixes • No-Family Excuses • ConeID Access Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.0.0
-// @description  Refactored LUX: encrypted OpenRouter key, Apps Script fallback with grace mode, adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question. Remote config kill-switch for old versions.
+// @version      13.0.2
+// @description  Refactored LUX: encrypted OpenRouter key, Apps Script fallback with grace mode, adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match        https://myoperatorservice.com/*
+// @updateURL    https://raw.githubusercontent.com/YOUR_USERNAME/lux-starr-framework/main/lux-starr-framework.user.js
+// @downloadURL  https://raw.githubusercontent.com/YOUR_USERNAME/lux-starr-framework/main/lux-starr-framework.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_notification
@@ -13,19 +15,8 @@
 // @connect      openrouter.ai
 // @connect      api.openrouter.ai
 // @connect      script.google.com
-// @connect      raw.githubusercontent.com
 // @run-at       document-end
-// @updateURL    https://raw.githubusercontent.com/Luxfer01/Lux-AI/main/lux-starr-framework.user.js
-// @downloadURL  https://raw.githubusercontent.com/Luxfer01/Lux-AI/main/lux-starr-framework.user.js
 // ==/UserScript==
-
-/* ============================
-   GLOBAL VERSION + CONFIG URL
-   ============================ */
-
-const LUX_VERSION    = "14.0.0";
-const LUX_CONFIG_URL = "https://raw.githubusercontent.com/Luxfer01/Lux-AI/main/config.json";
-
 /* ============================
    LUX ConeID ACCESS CONTROL
    (with 48h grace fallback)
@@ -221,43 +212,6 @@ async function lux_ensureAccess() {
 }
 
 /* ============================
-   REMOTE VERSION KILL-SWITCH
-   ============================ */
-
-async function lux_checkRemoteVersionOk() {
-  if (!LUX_CONFIG_URL) return true;
-  try {
-    const res = await fetch(LUX_CONFIG_URL, { method: "GET", cache: "no-cache" });
-    if (!res.ok) {
-      console.warn("LUX config HTTP", res.status);
-      return true; // don't block on config fetch failure
-    }
-    const cfg = await res.json();
-    const blocksRaw = cfg && Array.isArray(cfg.block_versions) ? cfg.block_versions : [];
-    const blocks = blocksRaw.map(v => String(v).trim()).filter(Boolean);
-    const cur = String(LUX_VERSION);
-
-    const isBlocked = blocks.some(b => {
-      if (!b) return false;
-      if (cur === b) return true;
-      // treat "13" as prefix killer for "13.0.0", "13.0.1" etc.
-      if (cur.startsWith(b + ".")) return true;
-      return false;
-    });
-
-    if (isBlocked) {
-      lux_lockUI(`version ${LUX_VERSION} is no longer allowed. Please update LUX to the latest version.`);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    console.warn("LUX remote version check failed", e);
-    // if config can't be read, don't brick the script
-    return true;
-  }
-}
-
-/* ============================
    MAIN LUX SCRIPT
    ============================ */
 
@@ -267,14 +221,14 @@ async function lux_checkRemoteVersionOk() {
   const accessOk = await lux_ensureAccess();
   if (!accessOk) return;
 
-  const versionOk = await lux_checkRemoteVersionOk();
-  if (!versionOk) return;
-
   // ===== Config =====
   const API_URL_DEFAULT = 'https://openrouter.ai/api/v1/chat/completions'; // OpenRouter default
   const OPENROUTER_KEY_DEFAULT = '';
-  const MODEL_DEFAULT = 'gpt-5-chat';
+
+  // MAIN DEFAULT: Grok 4 (fast)
+  const MODEL_DEFAULT = 'x-ai/grok-4-fast';
   const PROVIDER_DEFAULT = 'openrouter';
+
   const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
   const POLL_MS = 3000;
   const HISTORY_MAX = 14; // still used as a soft top, but we prune by tokens too
@@ -336,44 +290,72 @@ async function lux_checkRemoteVersionOk() {
     // GM_setValue(LUX_API_KEY_PLAIN_OLD, '');
   }
 
-  // ===== Creative-leaning per-model presets (safe but lively) =====
+  // 🔹 generic fallback preset if a model has no explicit tuning
+  const MODEL_FALLBACK_PRESET = {
+    temperature: 0.58,
+    top_p: 0.92,
+    repetition_penalty: 1.02,
+    max_tokens: 240,
+    stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+    seed: 11
+  };
+
+  // ===== Creative-leaning per-model presets (only the models we keep) =====
   const MODEL_PRESETS = {
-    'gpt-5-chat': {
-      temperature: 0.42, top_p: 0.94, repetition_penalty: 1.03, max_tokens: 240,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 7
-    },
-    'meta-llama/llama-3.3-70b-instruct': {
-      temperature: 0.38, top_p: 0.94, repetition_penalty: 1.04, max_tokens: 240,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 11
-    },
-    'x-ai/grok-3-mini': {
-      temperature: 0.50, top_p: 0.96, repetition_penalty: 1.03, max_tokens: 240,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 9
-    },
-    'meta-llama/llama-3.2-3b-instruct': {
-      temperature: 0.34, top_p: 0.80, repetition_penalty: 1.06, max_tokens: 220,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 5
-    },
+    // 1) Default – Grok 4 (fast), playful/clever vibe
     'x-ai/grok-4-fast': {
-      temperature: 0.44, top_p: 0.96, repetition_penalty: 1.03, max_tokens: 240,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 13
+      temperature: 0.72,
+      top_p: 0.96,
+      repetition_penalty: 1.02,
+      max_tokens: 240,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 13
     },
-    'meta-llama/llama-3.1-70b-instruct': {
-      temperature: 0.36, top_p: 0.94, repetition_penalty: 1.03, max_tokens: 240,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 3
+
+    // 2) Anthropic Sonnet – softer, emotional RP
+    'anthropic/claude-3.5-sonnet': {
+      temperature: 0.62,
+      top_p: 0.92,
+      repetition_penalty: 1.02,
+      max_tokens: 240,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 21
     },
+
+    // 3) GPT-4.1 mini – precise, obedient, still warm
+    'openai/gpt-4.1-mini': {
+      temperature: 0.55,
+      top_p: 0.92,
+      repetition_penalty: 1.03,
+      max_tokens: 240,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 7
+    },
+
+    // 4) Free Meta Llama – 3.3 8B
     'meta-llama/llama-3.3-8b-instruct:free': {
-      temperature: 0.32, top_p: 0.78, repetition_penalty: 1.07, max_tokens: 220,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 17
+      temperature: 0.65,
+      top_p: 0.95,
+      repetition_penalty: 1.04,
+      max_tokens: 220,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 17
     },
+
+    // 5) Free Meta Llama – 3.3 70B
     'meta-llama/llama-3.3-70b-instruct:free': {
-      temperature: 0.36, top_p: 0.90, repetition_penalty: 1.05, max_tokens: 230,
-      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 19
+      temperature: 0.66,
+      top_p: 0.95,
+      repetition_penalty: 1.03,
+      max_tokens: 230,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 19
     }
   };
+
   function getModelPreset(modelName) {
     const name = (modelName || GM_getValue('lux_model', MODEL_DEFAULT) || '').trim();
-    return MODEL_PRESETS[name] || MODEL_PRESETS['gpt-5-chat'];
+    return MODEL_PRESETS[name] || MODEL_FALLBACK_PRESET;
   }
 
   // ===== Rate limiting & token estimate =====
@@ -649,6 +631,68 @@ async function lux_checkRemoteVersionOk() {
   ui.excuseViaModel.checked = GM_getValue('lux_excuse_via_model',1)===1;
   ui.filterEnabled.checked = !!GM_getValue('lux_filter_enabled',0);
 
+  // ===== Models picker =====
+  const modelChoices = [
+    'x-ai/grok-4-fast',                         // default
+    'anthropic/claude-3.5-sonnet',
+    'openai/gpt-4.1-mini',
+    'meta-llama/llama-3.3-8b-instruct:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+  ];
+  let LUXSettingsDirty = false;
+
+  function renderModelButtons(){
+    const cur = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim();
+    const p = ui.modelsPanel;
+    p.innerHTML = '';
+    const head = document.createElement('div');
+    head.style.marginBottom = '6px';
+    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || 'default'}...</span>`;
+    p.appendChild(head);
+
+    modelChoices.forEach(m => {
+      const b = document.createElement('button');
+      b.className = 'lux-model';
+      b.textContent = m;
+      b.addEventListener('click', () => {
+        ui.model.value = m;
+        GM_setValue('lux_model', m);
+        // auto link provider
+        const providerField = ui.provider;
+        if (providerField) {
+          if (/gpt-|o3-|o1-/.test(m)) providerField.value = 'openai';
+          else providerField.value = 'openrouter';
+          GM_setValue('lux_provider', providerField.value.trim());
+        }
+        LUXSettingsDirty = true;
+        notify('Model set to ' + m);
+        LUXPatch.UIChips.refresh({ modelLabel: m });
+        renderModelButtons();
+      });
+      p.appendChild(b);
+    });
+  }
+  function toggleModelsPanel(){
+    const p = ui.modelsPanel;
+    const open = getComputedStyle(p).display !== 'none' && getComputedStyle(p).visibility !== 'hidden';
+    if (open){ p.style.display = 'none'; p.style.visibility = 'hidden'; }
+    else { renderModelButtons(); p.style.display = 'block'; p.style.visibility = 'visible'; }
+  }
+  ui.models.addEventListener('click', toggleModelsPanel);
+
+  // ===== Timestamp stripper =====
+  const TS_PATTERNS=[
+    /\[\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\]/gi,
+    /\(\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\)/gi,
+    /\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\b/gi,
+    /\b20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\b/g,
+    /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g,
+    /\b20\d{2}[01]\d[0-3]\d(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\b/g,
+    /\b\d{6,}\b/g,
+    /\breport\b\.?$/gi
+  ];
+  function stripTimestamps(s){let t=(s||'').trim();TS_PATTERNS.forEach(rx=>{t=t.replace(rx,'').trim();});t=t.replace(/[-–—|•]+\s*$/g,'').replace(/^\s*[-–—|•]+\s*/g,'').trim();return t;}
+
   // ===== LUXPatch namespaces =====
   const LUXPatch = (typeof window.LUXPatch!=='undefined' ? window.LUXPatch : (window.LUXPatch = {}));
 
@@ -703,7 +747,7 @@ async function lux_checkRemoteVersionOk() {
 
   /* ===========================
      PATCH: No-Repeat Guard
-     (substitution-based, with extra template killers)
+     (no pooled refusal phrases, just deletion)
      =========================== */
   LUXPatch.NoRepeat = (()=>{
 
@@ -736,33 +780,26 @@ async function lux_checkRemoteVersionOk() {
       "i'd like to focus on getting to know each other first"
     ];
 
-    const substitutionPool = [
-      "I'm keeping things light and comfortable here with you.",
-      "I'm happy staying right here in our chat.",
-      "I'm enjoying keeping this between us on the platform.",
-      "I like the way things feel here, just the two of us.",
-      "I'm all yours on this screen for now."
-    ];
-    function randomSub() {
-      return substitutionPool[Math.floor(Math.random() * substitutionPool.length)];
-    }
-    function substitute(text) {
+    function scrub(text) {
       if (!text) return text;
       let out = String(text);
       bannedPhrases.forEach(phrase => {
         if (!phrase) return;
         const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        if (regex.test(out)) {
-          const repl = randomSub();
-          out = out.replace(regex, repl);
-        }
+        out = out.replace(regex, ' ');
       });
-      return out;
+      return out.replace(/\s{2,}/g, ' ').trim();
     }
+
     function patterns(){ return []; }
     function excuseFrags(){ return []; }
-    function scrub(text){ return substitute(text); }
-    return { patterns, excuseFrags, scrub, substitute };
+
+    return {
+      patterns,
+      excuseFrags,
+      scrub,
+      substitute: scrub // API compatibility
+    };
   })();
 
   /* =========================================
@@ -788,27 +825,22 @@ async function lux_checkRemoteVersionOk() {
     const askName = s => NAME_RE.test((s||'').toLowerCase());
     const wantsLocation = s => LOCATION_RE.test((s||'').toLowerCase());
 
+    // NEW: no excuse pools – just strip family words unless user mentioned family
     function deFamily(text, customerMsg){
       if (!text) return text;
-      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg||'');
+      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg || '');
       if (userMentionedFamily) return text;
 
       let t = String(text);
       if (FAMILY_WORD_RE.test(t)) {
-        const pool = [
-          "I've got a few things to handle tonight",
-          "I promised myself a quiet evening",
-          "I've got an early start and need to wind down",
-          "I'm in the middle of small chores and bits",
-          "I'm cooking and keeping it low-key",
-          "My battery/data's tight so I’m keeping it light",
-          "I'm catching up on work and want to stay focused",
-          "I’m staying in and keeping it simple"
-        ];
-        const pick = pool[Math.floor(Math.random() * pool.length)];
-        t = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
-        if (!t || t.length < 8) t = pick + '.';
-        else if (!/[.?!]\s*$/.test(t)) t += '.';
+        const stripped = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
+        if (!stripped) {
+          // If stripping kills the sentence entirely, keep original to avoid weird empties
+          return text;
+        }
+        let out = stripped;
+        if (!/[.?!]\s*$/.test(out)) out += '.';
+        return out;
       }
       return t;
     }
@@ -1054,14 +1086,18 @@ async function lux_checkRemoteVersionOk() {
     });
   }
 
-  // ===== System prompt (quantified, self-aware picture acceptance & anti-template) =====
-  function buildSystemPrompt(leftCard,customSystem){
-    const card = (personaCardLine(leftCard)||'');
-    const core = [
+  // ===== System prompt (model-aware, still with bans & safety) =====
+  function buildSystemPrompt(leftCard, customSystem){
+    const card = (personaCardLine(leftCard) || '');
+    const modelName = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim().toLowerCase();
+
+    // Shared core rules for ALL models
+    const baseCore = [
       "You are an adult woman (she/her) on a dating site.",
       "Your tone is natural, warm, feminine and relaxed, never robotic.",
       "Your primary goal is to build deep, engaging rapport through short, unique messages.",
-      "Refusals: never use phrases that sound like stock boundaries such as \"let's build the connection first\", \"I'm not ready for that\", or any version of \"keep it online for now\". If you need to decline something, do it briefly and then pivot into a new, interesting topic instead of explaining your boundary.",
+      "Refusals: never use phrases that sound like stock boundaries such as \"let's build the connection first\", \"I'm not ready for that\", or any version of \"keep it online for now\".",
+      "If you need to decline something, do it briefly and then pivot into a new, interesting topic instead of explaining your boundary.",
       "Picture requests: always accept picture requests in a soft, platform-safe way. Do not refuse or deflect them. Vary your wording so it does not sound templated or repeated between chats.",
       "Safety: never share or ask for contacts/handles; no meetups, dates, drinks, or coffee; keep everything on-platform.",
       "Location asks: share only city, never an address or specific area.",
@@ -1071,9 +1107,61 @@ async function lux_checkRemoteVersionOk() {
       "Form: one short paragraph, no emojis, about 70–150 words (the client enforces an 800-character cap).",
       "End with exactly one natural open-ended question that fits the flow of what you just said. It must not sound like a recycled template."
     ].join(" ");
-    return (customSystem && customSystem.trim())
-      ? (customSystem + ' ' + card)
-      : (core + card);
+
+    // Model-specific flavour layers
+    let flavor = "";
+
+    if (modelName.startsWith("x-ai/grok-4")) {
+      // Grok 4 – witty, fast, slightly chaotic
+      flavor = [
+        "Lean into a witty, quick, slightly teasing vibe without being rude.",
+        "You can be playfully sarcastic, but never mean or dismissive.",
+        "Keep replies punchy and high-energy, like you're quick on your feet in conversation."
+      ].join(" ");
+    } else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) {
+      // Sonnet – soft, emotional, romantic
+      flavor = [
+        "Lean into a softer, emotionally aware, romantic tone.",
+        "Use sensory detail and gentle language, but keep it grounded and not overly poetic.",
+        "Let your replies feel intimate and attentive, like you're genuinely tuned into the other person."
+      ].join(" ");
+    } else if (modelName.startsWith("openai/gpt-4.1-mini")) {
+      // GPT-4.1 mini – precise, obedient, but warm
+      flavor = [
+        "Focus on being clear, coherent and highly responsive to the exact wording of their message.",
+        "You should feel composed and thoughtful, with a subtle warmth rather than dramatic emotions.",
+        "Reflect their questions directly and give specific, concrete responses before you pivot to a question."
+      ].join(" ");
+    } else if (modelName.includes("llama-3.3-8b")) {
+      // Llama 3.3 8B free – playful, simple, light
+      flavor = [
+        "Use simple, direct language and avoid complex or overly long sentences.",
+        "Keep the tone light, playful and easy-going, like small talk that slowly builds chemistry.",
+        "If you're unsure, ask a small follow-up question to keep the chat moving naturally."
+      ].join(" ");
+    } else if (modelName.includes("llama-3.3-70b")) {
+      // Llama 3.3 70B free – expressive, slightly richer
+      flavor = [
+        "You can be a bit more descriptive and expressive than the 8B model, but still stay concise.",
+        "Let your replies feel colourful and human without drifting into copy-paste romance lines.",
+        "Gently mirror the customer's style and energy level so the conversation feels personalised."
+      ].join(" ");
+    } else {
+      // Any other future model – fall back to neutral flavour
+      flavor = [
+        "Keep the style balanced: warm, human, slightly playful, but never over the top.",
+        "Match their energy level and avoid sounding generic or scripted."
+      ].join(" ");
+    }
+
+    const core = baseCore + " " + flavor;
+
+    // If user provided a custom persona/system block, respect it but still attach card
+    if (customSystem && customSystem.trim()) {
+      return customSystem + " " + card;
+    }
+
+    return core + card;
   }
 
   // ===== History =====
@@ -1108,19 +1196,6 @@ async function lux_checkRemoteVersionOk() {
     }
     return kept.reverse();
   }
-
-  // ===== Timestamp stripper =====
-  const TS_PATTERNS=[
-    /\[\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\]/gi,
-    /\(\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\)/gi,
-    /\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\b/gi,
-    /\b20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\b/g,
-    /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g,
-    /\b20\d{2}[01]\d[0-3]\d(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\b/g,
-    /\b\d{6,}\b/g,
-    /\breport\b\.?$/gi
-  ];
-  function stripTimestamps(s){let t=(s||'').trim();TS_PATTERNS.forEach(rx=>{t=t.replace(rx,'').trim();});t=t.replace(/[-–—|•]+\s*$/g,'').replace(/^\s*[-–—|•]+\s*/g,'').trim();return t;}
 
   // ===== UI render (hard clamp applied) =====
   function showReplies(items){
@@ -1293,8 +1368,6 @@ async function lux_checkRemoteVersionOk() {
   }
 
   // ===== Events =====
-  let LUXSettingsDirty = false;
-
   btn.addEventListener('click',()=>{
     ui.popup.style.display='block';
     ui.customer.focus();
