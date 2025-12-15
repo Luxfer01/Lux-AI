@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • All-Model Compatible • Punctuation Fixes • No-Family Excuses • ConeID Access Gate)
+// @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • ...)
 // @namespace    http://tampermonkey.net/
-// @version      13.0.2
-// @description  Refactored LUX: encrypted OpenRouter key, Apps Script fallback with grace mode, adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
+// @version      13.0.3-openrouter-creative-qguard
+// @description  ...
 // @match        https://myoperatorservice.com/*
-// @updateURL    https://raw.githubusercontent.com/Luxfer01/lux-framework/main/lux-starr-framework.user.js
-// @downloadURL  https://raw.githubusercontent.com/Luxfer01/lux-framework/main/lux-starr-framework.user.js
+// @updateURL    https://raw.githubusercontent.com/Luxfer01/Lux-AI/main/Lux-AI.user.js
+// @downloadURL  https://raw.githubusercontent.com/Luxfer01/Lux-AI/main/Lux-AI.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_notification
@@ -17,7 +17,6 @@
 // @connect      script.google.com
 // @run-at       document-end
 // ==/UserScript==
-
 /* ============================
    LUX ConeID ACCESS CONTROL
    (with 48h grace fallback)
@@ -648,7 +647,7 @@ async function lux_ensureAccess() {
     p.innerHTML = '';
     const head = document.createElement('div');
     head.style.marginBottom = '6px';
-    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || 'default'}...</span>`;
+    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || 'default'}</span>`;
     p.appendChild(head);
 
     modelChoices.forEach(m => {
@@ -748,7 +747,7 @@ async function lux_ensureAccess() {
 
   /* ===========================
      PATCH: No-Repeat Guard
-     (no pooled refusal phrases, just deletion)
+     (substitution-based, with extra template killers)
      =========================== */
   LUXPatch.NoRepeat = (()=>{
 
@@ -781,26 +780,123 @@ async function lux_ensureAccess() {
       "i'd like to focus on getting to know each other first"
     ];
 
-    function scrub(text) {
+    const substitutionPool = [
+      "I'm keeping things light and comfortable here with you.",
+      "I'm happy staying right here in our chat.",
+      "I'm enjoying keeping this between us on the platform.",
+      "I like the way things feel here, just the two of us.",
+      "I'm all yours on this screen for now."
+    ];
+    function randomSub() {
+      // extra randomness to avoid obvious pattern
+      const idx = Math.floor(Math.random() * substitutionPool.length * Math.random());
+      return substitutionPool[idx] || substitutionPool[0];
+    }
+    function substitute(text) {
       if (!text) return text;
       let out = String(text);
       bannedPhrases.forEach(phrase => {
         if (!phrase) return;
         const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        out = out.replace(regex, ' ');
+        if (regex.test(out)) {
+          const repl = randomSub();
+          out = out.replace(regex, repl);
+        }
       });
-      return out.replace(/\s{2,}/g, ' ').trim();
+      return out;
     }
-
     function patterns(){ return []; }
     function excuseFrags(){ return []; }
+    function scrub(text){ return substitute(text); }
+    return { patterns, excuseFrags, scrub, substitute };
+  })();
 
-    return {
-      patterns,
-      excuseFrags,
-      scrub,
-      substitute: scrub // API compatibility
-    };
+  /* ===========================
+     PATCH: Open Question Guard
+     (kills repeated closing questions)
+     =========================== */
+  LUXPatch.QGuard = (() => {
+    const KEY = 'lux_q_history_v1';
+
+    function loadHistory() {
+      try {
+        const raw = GM_getValue(KEY, '[]');
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function saveHistory(list) {
+      try {
+        GM_setValue(KEY, JSON.stringify(list || []));
+      } catch {}
+    }
+
+    function normalize(q) {
+      return (q || '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/^[\s\.\,\!\?]+|[\s\.\,\!\?]+$/g, '')
+        .trim();
+    }
+
+    function scrub(text) {
+      if (!text) return text;
+      const s = String(text);
+      const qm = s.lastIndexOf('?');
+      if (qm === -1) {
+        // no question at all → just return
+        return text;
+      }
+
+      // find start of last sentence before '?'
+      let start = Math.max(
+        s.lastIndexOf('.', qm - 1),
+        s.lastIndexOf('!', qm - 1),
+        s.lastIndexOf('?', qm - 1)
+      );
+
+      // if we can't find a clear prior sentence boundary, we don't want to
+      // accidentally delete the whole message; just record and return
+      if (start <= 0) {
+        const normAll = normalize(s);
+        if (normAll && normAll.length >= 6) {
+          const histAll = loadHistory();
+          if (!histAll.includes(normAll)) {
+            histAll.push(normAll);
+            if (histAll.length > 40) histAll.splice(0, histAll.length - 40);
+            saveHistory(histAll);
+          }
+        }
+        return text;
+      }
+
+      const body = s.slice(0, start + 1).trim();
+      const question = s.slice(start + 1).trim();
+      const normQ = normalize(question);
+
+      if (!normQ || normQ.length < 6) {
+        return text;
+      }
+
+      const hist = loadHistory();
+      if (hist.includes(normQ)) {
+        // repeated question → drop it, keep the body
+        const out = body || text;
+        return out.trim();
+      }
+
+      // new question → remember it
+      hist.push(normQ);
+      if (hist.length > 40) hist.splice(0, hist.length - 40);
+      saveHistory(hist);
+
+      return text;
+    }
+
+    return { scrub };
   })();
 
   /* =========================================
@@ -826,22 +922,20 @@ async function lux_ensureAccess() {
     const askName = s => NAME_RE.test((s||'').toLowerCase());
     const wantsLocation = s => LOCATION_RE.test((s||'').toLowerCase());
 
-    // NEW: no excuse pools – just strip family words unless user mentioned family
     function deFamily(text, customerMsg){
       if (!text) return text;
-      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg || '');
+      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg||'');
       if (userMentionedFamily) return text;
 
       let t = String(text);
       if (FAMILY_WORD_RE.test(t)) {
-        const stripped = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
-        if (!stripped) {
-          // If stripping kills the sentence entirely, keep original to avoid weird empties
-          return text;
+        // strip family words; we don't inject a fixed excuse pool here
+        t = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
+        if (!t || t.length < 8) {
+          t = "I've got a few things to handle tonight.";
+        } else if (!/[.?!]\s*$/.test(t)) {
+          t += '.';
         }
-        let out = stripped;
-        if (!/[.?!]\s*$/.test(out)) out += '.';
-        return out;
       }
       return t;
     }
@@ -853,7 +947,7 @@ async function lux_ensureAccess() {
         `No meetups/contacts/addresses; keep everything on-platform.`,
         `Be evasive and polite; avoid policy-ish wording.`,
         `Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.`,
-        `Prefer neutral reasons: timing/early start, staying in, errands/chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
+        `Prefer neutral reasons: timing/early start, staying in, small chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
         `Avoid: "oh", "oh wow", "flattered*", "enthusiasm*/enthusaism*", "sizzling", non-food "spicy", and "flirt*".`,
         `End with one natural, flow-matching open-ended question created by you. No templates.`,
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
@@ -869,7 +963,10 @@ async function lux_ensureAccess() {
       try { out = await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise); } catch {}
       out = deFamily(out||'', customerMsg);
       out = postFormat(out||'');
-      return out || "I’m keeping it here and low-key, thanks for understanding.";
+      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
+        out = LUXPatch.QGuard.scrub(out);
+      }
+      return out || "I'm keeping things low-key here, thanks for understanding.";
     }
 
     async function enforceNoMeetAccept(userMsg, text, profileCard){
@@ -1239,6 +1336,9 @@ async function lux_ensureAccess() {
       let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
       line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
       line = postFormat(line);
+      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
+        line = LUXPatch.QGuard.scrub(line);
+      }
       showReplies([line]); pushHist(rawMsg,line); return;
     }
     if(Safety.wantsLocation(rawMsg)) {
@@ -1249,18 +1349,27 @@ async function lux_ensureAccess() {
       let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
       line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
       line = postFormat(line);
+      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
+        line = LUXPatch.QGuard.scrub(line);
+      }
       showReplies([line]); pushHist(rawMsg,line); return;
     }
     if(Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
       let out = await Safety.modelRefusal('meet', leftCard, rawMsg);
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       out = postFormat(out);
+      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
+        out = LUXPatch.QGuard.scrub(out);
+      }
       showReplies([out]); pushHist(rawMsg,out); return;
     }
     if(Safety.wantsContact(rawMsg) || Safety.mentionsAddress(rawMsg)) {
       let kind = Safety.mentionsAddress(rawMsg)?'address':'contact';
       let out = await Safety.modelRefusal(kind, leftCard, rawMsg);
       out = postFormat(out);
+      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
+        out = LUXPatch.QGuard.scrub(out);
+      }
       showReplies([out]); pushHist(rawMsg,out); return;
     }
 
@@ -1313,6 +1422,9 @@ async function lux_ensureAccess() {
 
           content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
           content = postFormat(content);
+          if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
+            content = LUXPatch.QGuard.scrub(content);
+          }
 
           LUXPatch.UIChips.refresh({ modelLabel: chosenModel });
           showReplies([content]);
