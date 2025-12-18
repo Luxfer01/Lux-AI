@@ -18,7 +18,7 @@
 // @run-at       document-end
 // ==/UserScript==
 // ============================
-   LUX ConeID ACCESS CONTROL
+/*   LUX ConeID ACCESS CONTROL
    (STRICT – no grace mode)
    ============================ */
 
