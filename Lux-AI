@@ -19,13 +19,16 @@
 // ==/UserScript==
 /* ============================
    LUX ConeID ACCESS CONTROL
-   (with 48h grace fallback)
+   (STRICT – no grace mode)
    ============================ */
 
 // IMPORTANT: this must match your deployed Apps Script URL
 const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxbT4oMvS55vseWSjmsGt3DRSFqyrgMWY-30G44Ui6sjDwary2o0uVmrb0F9RBTh3gYJA/exec";
-const ACCESS_CACHE_DAYS = 31;
-const ACCESS_GRACE_HOURS = 48;
+
+// we still keep a cache, but ONLY to remember the last ConeID used
+// and the last result. Access is always checked live with the server.
+const LUX_ACCESS_CACHE_KEY_V2 = "lux_access_cache_v2";
+// structure: { coneId, allowed, expiresAt, checkedAt, reason }
 
 // simple modal to request ConeID
 function lux_promptConeId() {
@@ -133,10 +136,6 @@ async function lux_checkOnlineAccess(coneId) {
   }
 }
 
-// v2 access cache (includes grace)
-const LUX_ACCESS_CACHE_KEY_V2 = "lux_access_cache_v2";
-// structure: { coneId, allowed, expiresAt, graceUntil }
-
 function lux_getAccessCache() {
   try {
     const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V2, "");
@@ -148,6 +147,7 @@ function lux_getAccessCache() {
     return null;
   }
 }
+
 function lux_setAccessCache(data) {
   try {
     GM_setValue(LUX_ACCESS_CACHE_KEY_V2, JSON.stringify(data || {}));
@@ -156,26 +156,12 @@ function lux_setAccessCache(data) {
   }
 }
 
-// async gate function used by main script (with grace)
+// STRICT gate: always check live, no grace, cache only stores ConeID + last result
 async function lux_ensureAccess() {
   const now = Date.now();
   let cache = lux_getAccessCache();
 
-  // If we have valid, unexpired access → allow directly
-  if (cache && cache.allowed && typeof cache.expiresAt === "number" && now < cache.expiresAt) {
-    return true;
-  }
-
-  // If we are past expiry but still within grace → allow but warn
-  if (cache && cache.allowed && cache.graceUntil && now < cache.graceUntil) {
-    lux_showErrorOverlay(
-      "LUX is running in offline grace mode.\n" +
-      "The license server couldn't be reached recently, but your access is temporarily extended."
-    );
-    return true;
-  }
-
-  // Need fresh check or first-time access
+  // always have a ConeID, but NEVER trust old "allowed" blindly
   const coneId = (cache && cache.coneId) || (await lux_promptConeId());
   if (!coneId) {
     lux_lockUI("no ConeID provided");
@@ -183,31 +169,49 @@ async function lux_ensureAccess() {
   }
 
   const result = await lux_checkOnlineAccess(coneId);
-  if (!result || !result.allowed) {
-    // network fail → try grace if we have any cached allowance
-    if (result && result.reason === "network-error" && cache && cache.allowed && cache.graceUntil && now < cache.graceUntil) {
-      lux_showErrorOverlay(
-        "LUX cannot reach the license server right now.\n" +
-        "You are running under extended offline grace access."
-      );
-      return true;
-    }
-    lux_setAccessCache({ coneId, allowed: false, expiresAt: now, graceUntil: now });
-    lux_lockUI(result && result.reason ? result.reason : "not-allowed");
+
+  // if the license server itself is unreachable → hard fail
+  if (!result || result.reason === "network-error") {
+    lux_setAccessCache({
+      coneId,
+      allowed: false,
+      checkedAt: now,
+      reason: result && result.reason ? result.reason : "license-server-unreachable"
+    });
+    lux_showErrorOverlay("LUX cannot reach the license server right now. Access is blocked until it responds.");
+    lux_lockUI("license server unreachable");
     return false;
   }
 
-  // Positive result → compute expiry + grace
-  const softExp = now + ACCESS_CACHE_DAYS * 24 * 60 * 60 * 1000;
-  let sheetExp = softExp;
+  // any explicit "not allowed" or expired → instant lock
+  let expiresAt = null;
   if (result.expires) {
     const ts = new Date(result.expires + "T23:59:59").getTime();
-    if (!isNaN(ts)) sheetExp = ts;
+    if (!isNaN(ts)) {
+      expiresAt = ts;
+    }
   }
-  const finalExp = Math.min(softExp, sheetExp);
-  const graceUntil = finalExp + ACCESS_GRACE_HOURS * 60 * 60 * 1000;
 
-  lux_setAccessCache({ coneId, allowed: true, expiresAt: finalExp, graceUntil });
+  if (!result.allowed || (expiresAt && now > expiresAt)) {
+    lux_setAccessCache({
+      coneId,
+      allowed: false,
+      checkedAt: now,
+      expiresAt: expiresAt || null,
+      reason: result.reason || (expiresAt && now > expiresAt ? "expired" : "not-allowed")
+    });
+    lux_lockUI(result.reason || (expiresAt && now > expiresAt ? "access-expired" : "not-allowed"));
+    return false;
+  }
+
+  // if we’re here: live check says ALLOWED right now
+  lux_setAccessCache({
+    coneId,
+    allowed: true,
+    checkedAt: now,
+    expiresAt: expiresAt || null,
+    reason: "ok"
+  });
   return true;
 }
 
@@ -647,7 +651,7 @@ async function lux_ensureAccess() {
     p.innerHTML = '';
     const head = document.createElement('div');
     head.style.marginBottom = '6px';
-    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || 'default'}...</span>`;
+    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || 'default'}</span>`;
     p.appendChild(head);
 
     modelChoices.forEach(m => {
@@ -747,7 +751,7 @@ async function lux_ensureAccess() {
 
   /* ===========================
      PATCH: No-Repeat Guard
-     (no pooled refusal phrases, just deletion)
+     (substitution-based, with extra template killers)
      =========================== */
   LUXPatch.NoRepeat = (()=>{
 
@@ -780,26 +784,33 @@ async function lux_ensureAccess() {
       "i'd like to focus on getting to know each other first"
     ];
 
-    function scrub(text) {
+    const substitutionPool = [
+      "I'm keeping things light and comfortable here with you.",
+      "I'm happy staying right here in our chat.",
+      "I'm enjoying keeping this between us on the platform.",
+      "I like the way things feel here, just the two of us.",
+      "I'm all yours on this screen for now."
+    ];
+    function randomSub() {
+      return substitutionPool[Math.floor(Math.random() * Math.random() * substitutionPool.length)] || substitutionPool[0];
+    }
+    function substitute(text) {
       if (!text) return text;
       let out = String(text);
       bannedPhrases.forEach(phrase => {
         if (!phrase) return;
         const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        out = out.replace(regex, ' ');
+        if (regex.test(out)) {
+          const repl = randomSub();
+          out = out.replace(regex, repl);
+        }
       });
-      return out.replace(/\s{2,}/g, ' ').trim();
+      return out;
     }
-
     function patterns(){ return []; }
     function excuseFrags(){ return []; }
-
-    return {
-      patterns,
-      excuseFrags,
-      scrub,
-      substitute: scrub // API compatibility
-    };
+    function scrub(text){ return substitute(text); }
+    return { patterns, excuseFrags, scrub, substitute };
   })();
 
   /* =========================================
@@ -825,22 +836,27 @@ async function lux_ensureAccess() {
     const askName = s => NAME_RE.test((s||'').toLowerCase());
     const wantsLocation = s => LOCATION_RE.test((s||'').toLowerCase());
 
-    // NEW: no excuse pools – just strip family words unless user mentioned family
     function deFamily(text, customerMsg){
       if (!text) return text;
-      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg || '');
+      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg||'');
       if (userMentionedFamily) return text;
 
       let t = String(text);
       if (FAMILY_WORD_RE.test(t)) {
-        const stripped = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
-        if (!stripped) {
-          // If stripping kills the sentence entirely, keep original to avoid weird empties
-          return text;
-        }
-        let out = stripped;
-        if (!/[.?!]\s*$/.test(out)) out += '.';
-        return out;
+        const pool = [
+          "I've got a few things to handle tonight",
+          "I promised myself a quiet evening",
+          "I've got an early start and need to relax",
+          "I'm in the middle of small chores and bits",
+          "I'm cooking and keeping it low-key",
+          "My battery/data's tight so I’m keeping it light",
+          "I'm catching up on work and want to stay focused",
+          "I’m staying in and keeping it simple"
+        ];
+        const pick = pool[Math.floor(Math.random() * pool.length)];
+        t = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
+        if (!t || t.length < 8) t = pick + '.';
+        else if (!/[.?!]\s*$/.test(t)) t += '.';
       }
       return t;
     }
@@ -848,13 +864,13 @@ async function lux_ensureAccess() {
     async function modelRefusal(kind, profileCard, customerMsg){
       const tc = buildTimeContext();
       const sys = [
-        `You are an adult woman on a dating site. Natural, warm, concise.`,
-        `No meetups/contacts/addresses; keep everything on-platform.`,
-        `Be evasive and polite; avoid policy-ish wording.`,
-        `Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.`,
-        `Prefer neutral reasons: timing/early start, staying in, errands/chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
-        `Avoid: "oh", "oh wow", "flattered*", "enthusiasm*/enthusaism*", "sizzling", non-food "spicy", and "flirt*".`,
-        `End with one natural, flow-matching open-ended question created by you. No templates.`,
+        "You are an adult woman on a dating site. Natural, warm, concise.",
+        "No meetups/contacts/addresses; keep everything on-platform.",
+        "Be evasive and polite; avoid policy-ish wording.",
+        "Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.",
+        "Prefer neutral reasons: timing/early start, staying in, chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.",
+        "Avoid: 'oh', 'oh wow', 'flattered*', 'enthusiasm*/enthusaism*', 'sizzling', non-food 'spicy', and 'flirt*'.",
+        "End with one natural, flow-matching open-ended question created by you. No templates.",
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         (personaCardLine(profileCard)||'')
       ].join(' ');
@@ -868,7 +884,7 @@ async function lux_ensureAccess() {
       try { out = await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise); } catch {}
       out = deFamily(out||'', customerMsg);
       out = postFormat(out||'');
-      return out || "I’m keeping it here and low-key, thanks for understanding.";
+      return out || "I'm keeping it here and low-key, thanks for understanding.";
     }
 
     async function enforceNoMeetAccept(userMsg, text, profileCard){
