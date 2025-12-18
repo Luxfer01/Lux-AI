@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • ...)
+// @name         LUX-AI Framework v13 (OpenRouter • Encrypted Key • Creative Booster • All-Model Compatible • Punctuation Fixes • No-Family Excuses • ConeID Access Gate)
 // @namespace    http://tampermonkey.net/
-// @version      13.0.3-openrouter-creative-qguard
-// @description  ...
+// @version      13.0.2
+// @description  Refactored LUX: encrypted OpenRouter key, Apps Script fallback with grace mode, adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match        https://myoperatorservice.com/*
-// @updateURL    https://raw.githubusercontent.com/Luxfer01/Lux-AI/main/Lux-AI.user.js
-// @downloadURL  https://raw.githubusercontent.com/Luxfer01/Lux-AI/main/Lux-AI.user.js
+// @updateURL    https://raw.githubusercontent.com/Luxfer01/Lux-AI/refs/heads/user.js/Lux-AI
+// @downloadURL  https://raw.githubusercontent.com/Luxfer01/Lux-AI/refs/heads/user.js/Lux-AI
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_notification
@@ -17,15 +17,18 @@
 // @connect      script.google.com
 // @run-at       document-end
 // ==/UserScript==
-/* ============================
+// ============================
    LUX ConeID ACCESS CONTROL
-   (with 48h grace fallback)
+   (STRICT – no grace mode)
    ============================ */
 
 // IMPORTANT: this must match your deployed Apps Script URL
 const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxbT4oMvS55vseWSjmsGt3DRSFqyrgMWY-30G44Ui6sjDwary2o0uVmrb0F9RBTh3gYJA/exec";
-const ACCESS_CACHE_DAYS = 31;
-const ACCESS_GRACE_HOURS = 48;
+
+// we still keep a cache, but ONLY to remember the last ConeID used
+// and the last result. Access is always checked live with the server.
+const LUX_ACCESS_CACHE_KEY_V2 = "lux_access_cache_v2";
+// structure: { coneId, allowed, expiresAt, checkedAt, reason }
 
 // simple modal to request ConeID
 function lux_promptConeId() {
@@ -133,10 +136,6 @@ async function lux_checkOnlineAccess(coneId) {
   }
 }
 
-// v2 access cache (includes grace)
-const LUX_ACCESS_CACHE_KEY_V2 = "lux_access_cache_v2";
-// structure: { coneId, allowed, expiresAt, graceUntil }
-
 function lux_getAccessCache() {
   try {
     const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V2, "");
@@ -148,6 +147,7 @@ function lux_getAccessCache() {
     return null;
   }
 }
+
 function lux_setAccessCache(data) {
   try {
     GM_setValue(LUX_ACCESS_CACHE_KEY_V2, JSON.stringify(data || {}));
@@ -156,26 +156,12 @@ function lux_setAccessCache(data) {
   }
 }
 
-// async gate function used by main script (with grace)
+// STRICT gate: always check live, no grace, cache only stores ConeID + last result
 async function lux_ensureAccess() {
   const now = Date.now();
   let cache = lux_getAccessCache();
 
-  // If we have valid, unexpired access → allow directly
-  if (cache && cache.allowed && typeof cache.expiresAt === "number" && now < cache.expiresAt) {
-    return true;
-  }
-
-  // If we are past expiry but still within grace → allow but warn
-  if (cache && cache.allowed && cache.graceUntil && now < cache.graceUntil) {
-    lux_showErrorOverlay(
-      "LUX is running in offline grace mode.\n" +
-      "The license server couldn't be reached recently, but your access is temporarily extended."
-    );
-    return true;
-  }
-
-  // Need fresh check or first-time access
+  // always have a ConeID, but NEVER trust old "allowed" blindly
   const coneId = (cache && cache.coneId) || (await lux_promptConeId());
   if (!coneId) {
     lux_lockUI("no ConeID provided");
@@ -183,31 +169,49 @@ async function lux_ensureAccess() {
   }
 
   const result = await lux_checkOnlineAccess(coneId);
-  if (!result || !result.allowed) {
-    // network fail → try grace if we have any cached allowance
-    if (result && result.reason === "network-error" && cache && cache.allowed && cache.graceUntil && now < cache.graceUntil) {
-      lux_showErrorOverlay(
-        "LUX cannot reach the license server right now.\n" +
-        "You are running under extended offline grace access."
-      );
-      return true;
-    }
-    lux_setAccessCache({ coneId, allowed: false, expiresAt: now, graceUntil: now });
-    lux_lockUI(result && result.reason ? result.reason : "not-allowed");
+
+  // if the license server itself is unreachable → hard fail
+  if (!result || result.reason === "network-error") {
+    lux_setAccessCache({
+      coneId,
+      allowed: false,
+      checkedAt: now,
+      reason: result && result.reason ? result.reason : "license-server-unreachable"
+    });
+    lux_showErrorOverlay("LUX cannot reach the license server right now. Access is blocked until it responds.");
+    lux_lockUI("license server unreachable");
     return false;
   }
 
-  // Positive result → compute expiry + grace
-  const softExp = now + ACCESS_CACHE_DAYS * 24 * 60 * 60 * 1000;
-  let sheetExp = softExp;
+  // any explicit "not allowed" or expired → instant lock
+  let expiresAt = null;
   if (result.expires) {
     const ts = new Date(result.expires + "T23:59:59").getTime();
-    if (!isNaN(ts)) sheetExp = ts;
+    if (!isNaN(ts)) {
+      expiresAt = ts;
+    }
   }
-  const finalExp = Math.min(softExp, sheetExp);
-  const graceUntil = finalExp + ACCESS_GRACE_HOURS * 60 * 60 * 1000;
 
-  lux_setAccessCache({ coneId, allowed: true, expiresAt: finalExp, graceUntil });
+  if (!result.allowed || (expiresAt && now > expiresAt)) {
+    lux_setAccessCache({
+      coneId,
+      allowed: false,
+      checkedAt: now,
+      expiresAt: expiresAt || null,
+      reason: result.reason || (expiresAt && now > expiresAt ? "expired" : "not-allowed")
+    });
+    lux_lockUI(result.reason || (expiresAt && now > expiresAt ? "access-expired" : "not-allowed"));
+    return false;
+  }
+
+  // if we’re here: live check says ALLOWED right now
+  lux_setAccessCache({
+    coneId,
+    allowed: true,
+    checkedAt: now,
+    expiresAt: expiresAt || null,
+    reason: "ok"
+  });
   return true;
 }
 
@@ -788,9 +792,7 @@ async function lux_ensureAccess() {
       "I'm all yours on this screen for now."
     ];
     function randomSub() {
-      // extra randomness to avoid obvious pattern
-      const idx = Math.floor(Math.random() * substitutionPool.length * Math.random());
-      return substitutionPool[idx] || substitutionPool[0];
+      return substitutionPool[Math.floor(Math.random() * Math.random() * substitutionPool.length)] || substitutionPool[0];
     }
     function substitute(text) {
       if (!text) return text;
@@ -809,94 +811,6 @@ async function lux_ensureAccess() {
     function excuseFrags(){ return []; }
     function scrub(text){ return substitute(text); }
     return { patterns, excuseFrags, scrub, substitute };
-  })();
-
-  /* ===========================
-     PATCH: Open Question Guard
-     (kills repeated closing questions)
-     =========================== */
-  LUXPatch.QGuard = (() => {
-    const KEY = 'lux_q_history_v1';
-
-    function loadHistory() {
-      try {
-        const raw = GM_getValue(KEY, '[]');
-        const arr = JSON.parse(raw);
-        return Array.isArray(arr) ? arr : [];
-      } catch {
-        return [];
-      }
-    }
-
-    function saveHistory(list) {
-      try {
-        GM_setValue(KEY, JSON.stringify(list || []));
-      } catch {}
-    }
-
-    function normalize(q) {
-      return (q || '')
-        .toLowerCase()
-        .replace(/\s+/g, ' ')
-        .replace(/^[\s\.\,\!\?]+|[\s\.\,\!\?]+$/g, '')
-        .trim();
-    }
-
-    function scrub(text) {
-      if (!text) return text;
-      const s = String(text);
-      const qm = s.lastIndexOf('?');
-      if (qm === -1) {
-        // no question at all → just return
-        return text;
-      }
-
-      // find start of last sentence before '?'
-      let start = Math.max(
-        s.lastIndexOf('.', qm - 1),
-        s.lastIndexOf('!', qm - 1),
-        s.lastIndexOf('?', qm - 1)
-      );
-
-      // if we can't find a clear prior sentence boundary, we don't want to
-      // accidentally delete the whole message; just record and return
-      if (start <= 0) {
-        const normAll = normalize(s);
-        if (normAll && normAll.length >= 6) {
-          const histAll = loadHistory();
-          if (!histAll.includes(normAll)) {
-            histAll.push(normAll);
-            if (histAll.length > 40) histAll.splice(0, histAll.length - 40);
-            saveHistory(histAll);
-          }
-        }
-        return text;
-      }
-
-      const body = s.slice(0, start + 1).trim();
-      const question = s.slice(start + 1).trim();
-      const normQ = normalize(question);
-
-      if (!normQ || normQ.length < 6) {
-        return text;
-      }
-
-      const hist = loadHistory();
-      if (hist.includes(normQ)) {
-        // repeated question → drop it, keep the body
-        const out = body || text;
-        return out.trim();
-      }
-
-      // new question → remember it
-      hist.push(normQ);
-      if (hist.length > 40) hist.splice(0, hist.length - 40);
-      saveHistory(hist);
-
-      return text;
-    }
-
-    return { scrub };
   })();
 
   /* =========================================
@@ -929,13 +843,20 @@ async function lux_ensureAccess() {
 
       let t = String(text);
       if (FAMILY_WORD_RE.test(t)) {
-        // strip family words; we don't inject a fixed excuse pool here
+        const pool = [
+          "I've got a few things to handle tonight",
+          "I promised myself a quiet evening",
+          "I've got an early start and need to relax",
+          "I'm in the middle of small chores and bits",
+          "I'm cooking and keeping it low-key",
+          "My battery/data's tight so I’m keeping it light",
+          "I'm catching up on work and want to stay focused",
+          "I’m staying in and keeping it simple"
+        ];
+        const pick = pool[Math.floor(Math.random() * pool.length)];
         t = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
-        if (!t || t.length < 8) {
-          t = "I've got a few things to handle tonight.";
-        } else if (!/[.?!]\s*$/.test(t)) {
-          t += '.';
-        }
+        if (!t || t.length < 8) t = pick + '.';
+        else if (!/[.?!]\s*$/.test(t)) t += '.';
       }
       return t;
     }
@@ -943,13 +864,13 @@ async function lux_ensureAccess() {
     async function modelRefusal(kind, profileCard, customerMsg){
       const tc = buildTimeContext();
       const sys = [
-        `You are an adult woman on a dating site. Natural, warm, concise.`,
-        `No meetups/contacts/addresses; keep everything on-platform.`,
-        `Be evasive and polite; avoid policy-ish wording.`,
-        `Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.`,
-        `Prefer neutral reasons: timing/early start, staying in, small chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
-        `Avoid: "oh", "oh wow", "flattered*", "enthusiasm*/enthusaism*", "sizzling", non-food "spicy", and "flirt*".`,
-        `End with one natural, flow-matching open-ended question created by you. No templates.`,
+        "You are an adult woman on a dating site. Natural, warm, concise.",
+        "No meetups/contacts/addresses; keep everything on-platform.",
+        "Be evasive and polite; avoid policy-ish wording.",
+        "Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.",
+        "Prefer neutral reasons: timing/early start, staying in, chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.",
+        "Avoid: 'oh', 'oh wow', 'flattered*', 'enthusiasm*/enthusaism*', 'sizzling', non-food 'spicy', and 'flirt*'.",
+        "End with one natural, flow-matching open-ended question created by you. No templates.",
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         (personaCardLine(profileCard)||'')
       ].join(' ');
@@ -963,10 +884,7 @@ async function lux_ensureAccess() {
       try { out = await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise); } catch {}
       out = deFamily(out||'', customerMsg);
       out = postFormat(out||'');
-      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
-        out = LUXPatch.QGuard.scrub(out);
-      }
-      return out || "I'm keeping things low-key here, thanks for understanding.";
+      return out || "I'm keeping it here and low-key, thanks for understanding.";
     }
 
     async function enforceNoMeetAccept(userMsg, text, profileCard){
@@ -1336,9 +1254,6 @@ async function lux_ensureAccess() {
       let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
       line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
       line = postFormat(line);
-      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
-        line = LUXPatch.QGuard.scrub(line);
-      }
       showReplies([line]); pushHist(rawMsg,line); return;
     }
     if(Safety.wantsLocation(rawMsg)) {
@@ -1349,27 +1264,18 @@ async function lux_ensureAccess() {
       let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
       line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
       line = postFormat(line);
-      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
-        line = LUXPatch.QGuard.scrub(line);
-      }
       showReplies([line]); pushHist(rawMsg,line); return;
     }
     if(Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
       let out = await Safety.modelRefusal('meet', leftCard, rawMsg);
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       out = postFormat(out);
-      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
-        out = LUXPatch.QGuard.scrub(out);
-      }
       showReplies([out]); pushHist(rawMsg,out); return;
     }
     if(Safety.wantsContact(rawMsg) || Safety.mentionsAddress(rawMsg)) {
       let kind = Safety.mentionsAddress(rawMsg)?'address':'contact';
       let out = await Safety.modelRefusal(kind, leftCard, rawMsg);
       out = postFormat(out);
-      if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
-        out = LUXPatch.QGuard.scrub(out);
-      }
       showReplies([out]); pushHist(rawMsg,out); return;
     }
 
@@ -1422,9 +1328,6 @@ async function lux_ensureAccess() {
 
           content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
           content = postFormat(content);
-          if (LUXPatch && LUXPatch.QGuard && typeof LUXPatch.QGuard.scrub === 'function') {
-            content = LUXPatch.QGuard.scrub(content);
-          }
 
           LUXPatch.UIChips.refresh({ modelLabel: chosenModel });
           showReplies([content]);
