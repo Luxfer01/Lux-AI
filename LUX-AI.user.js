@@ -1,36 +1,30 @@
 // ==UserScript==
-// @name         LUX-AI Framework v13 (OpenRouter • Encrypted Key • Creative Booster • All-Model Compatible • Punctuation Fixes • No-Family Excuses • ConeID Access Gate)
-// @namespace    http://tampermonkey.net/
-// @version      13.0.2
-// @description  Refactored LUX: encrypted OpenRouter key, Apps Script fallback with grace mode, adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
-// @match        https://myoperatorservice.com/*
-// @updateURL    https://raw.githubusercontent.com/Luxfer01/Lux-AI/refs/heads/user.js/Lux-AI
-// @downloadURL  https://raw.githubusercontent.com/Luxfer01/Lux-AI/refs/heads/user.js/Lux-AI
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_notification
-// @grant        GM_xmlhttpRequest
-// @connect      127.0.0.1
-// @connect      localhost
-// @connect      openrouter.ai
-// @connect      api.openrouter.ai
-// @connect      script.google.com
-// @run-at       document-end
+// @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
+// @namespace http://tampermonkey.net/
+// @version 13.0.2-openrouter-strict-access
+// @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
+// @match https://myoperatorservice.com/*
+// @grant GM_getValue
+// @grant GM_setValue
+// @grant GM_notification
+// @grant GM_xmlhttpRequest
+// @connect 127.0.0.1
+// @connect localhost
+// @connect openrouter.ai
+// @connect api.openrouter.ai
+// @connect script.google.com
+// @run-at document-end
 // ==/UserScript==
-// ============================
-/*   LUX ConeID ACCESS CONTROL
-   (STRICT – no grace mode)
+
+/* ============================
+   LUX ConeID ACCESS CONTROL
+   (STRICT: NO OFFLINE GRACE)
    ============================ */
 
-// IMPORTANT: this must match your deployed Apps Script URL
-const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxbT4oMvS55vseWSjmsGt3DRSFqyrgMWY-30G44Ui6sjDwary2o0uVmrb0F9RBTh3gYJA/exec";
+// IMPORTANT: your deployed Apps Script URL
+const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxBCywRTXBGE1AgLmOPON-xmcoMg09I7ETeUc6ih-U8vpqjWXOWfsVRkwRctZdh4nQ/exec";
 
-// we still keep a cache, but ONLY to remember the last ConeID used
-// and the last result. Access is always checked live with the server.
-const LUX_ACCESS_CACHE_KEY_V2 = "lux_access_cache_v2";
-// structure: { coneId, allowed, expiresAt, checkedAt, reason }
-
-// simple modal to request ConeID
+// simple modal to request ConeID (only when none is saved)
 function lux_promptConeId() {
   return new Promise(resolve => {
     const wrapper = document.createElement("div");
@@ -45,7 +39,7 @@ function lux_promptConeId() {
       <div style="font-size:22px;margin-bottom:10px;">LUX access</div>
       <div style="font-size:16px;margin-bottom:10px;">Enter your ConeID to continue:</div>
       <input id="lux_cone_input" style="padding:8px 10px;font-size:18px;border-radius:6px;border:1px solid #3c4c66;min-width:220px;text-align:center;background:#111;color:#fff;">
-      <button id="lux_cone_btn" style="margin-top:12px;padding:8px 18px;font-size:16px;border-radius:8px;border:0;background:#0b3d91;color:#fff;font-weight:600;cursor:pointer;">Submit</button>
+      <button id="lux_cone_btn" style="margin-top:12px;padding:8px 18px;font-size:16px;border-radius:6px;border:0;background:#0b3d91;color:#fff;font-weight:600;cursor:pointer;">Submit</button>
     `;
     document.body.appendChild(wrapper);
     const input = wrapper.querySelector("#lux_cone_input");
@@ -63,7 +57,7 @@ function lux_promptConeId() {
   });
 }
 
-// hard lock overlay
+// hard lock overlay – used when license is invalid / expired / unreachable
 function lux_lockUI(reason) {
   const div = document.createElement("div");
   div.style.cssText = `
@@ -73,11 +67,11 @@ function lux_lockUI(reason) {
     display:flex;align-items:center;justify-content:center;
     text-align:center;padding:32px;font-size:18px;
   `;
-  div.textContent = `Access denied: ${reason || "not whitelisted"}. Contact admin to be added.`;
+  div.textContent = `LUX access blocked: ${reason || "not whitelisted or license server unreachable"}.`;
   document.body.appendChild(div);
 }
 
-// shared error overlay for API problems (NOT as chat text)
+// shared error overlay for other API problems (OpenRouter etc., NOT license state)
 function lux_showErrorOverlay(msg) {
   const id = "lux-error-overlay";
   let div = document.getElementById(id);
@@ -136,9 +130,13 @@ async function lux_checkOnlineAccess(coneId) {
   }
 }
 
+// v3 access cache – just remembers coneId + last state, NO GRACE
+// structure: { coneId, lastStatus, lastCheckMs, expiresAt }
+const LUX_ACCESS_CACHE_KEY_V3 = "lux_access_cache_v3";
+
 function lux_getAccessCache() {
   try {
-    const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V2, "");
+    const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V3, "");
     if (!raw) return null;
     const obj = JSON.parse(raw);
     if (!obj || !obj.coneId) return null;
@@ -147,71 +145,58 @@ function lux_getAccessCache() {
     return null;
   }
 }
-
 function lux_setAccessCache(data) {
   try {
-    GM_setValue(LUX_ACCESS_CACHE_KEY_V2, JSON.stringify(data || {}));
+    GM_setValue(LUX_ACCESS_CACHE_KEY_V3, JSON.stringify(data || {}));
   } catch (e) {
     console.warn("LUX access store error", e);
   }
 }
 
-// STRICT gate: always check live, no grace, cache only stores ConeID + last result
+// STRICT gate: always re-check server, but never re-prompt ConeID unless missing
 async function lux_ensureAccess() {
-  const now = Date.now();
   let cache = lux_getAccessCache();
 
-  // always have a ConeID, but NEVER trust old "allowed" blindly
-  const coneId = (cache && cache.coneId) || (await lux_promptConeId());
+  // 1) Ensure we have a ConeID (prompt once, then reuse)
+  let coneId = cache && cache.coneId;
   if (!coneId) {
-    lux_lockUI("no ConeID provided");
-    return false;
+    coneId = await lux_promptConeId();
+    if (!coneId) {
+      lux_lockUI("no ConeID provided");
+      return false;
+    }
+    cache = { coneId };
   }
 
+  // 2) Always ask the Apps Script on every page load
   const result = await lux_checkOnlineAccess(coneId);
 
-  // if the license server itself is unreachable → hard fail
-  if (!result || result.reason === "network-error") {
+  if (!result || !result.allowed) {
+    const reason = result && result.reason ? result.reason : "not-allowed";
     lux_setAccessCache({
       coneId,
-      allowed: false,
-      checkedAt: now,
-      reason: result && result.reason ? result.reason : "license-server-unreachable"
+      lastStatus: "denied",
+      lastCheckMs: Date.now(),
+      expiresAt: null
     });
-    lux_showErrorOverlay("LUX cannot reach the license server right now. Access is blocked until it responds.");
-    lux_lockUI("license server unreachable");
+    lux_lockUI(reason);
     return false;
   }
 
-  // any explicit "not allowed" or expired → instant lock
-  let expiresAt = null;
+  // 3) Allowed – record latest status/expiry for debugging only
+  let expTs = null;
   if (result.expires) {
     const ts = new Date(result.expires + "T23:59:59").getTime();
-    if (!isNaN(ts)) {
-      expiresAt = ts;
-    }
+    if (!isNaN(ts)) expTs = ts;
   }
-
-  if (!result.allowed || (expiresAt && now > expiresAt)) {
-    lux_setAccessCache({
-      coneId,
-      allowed: false,
-      checkedAt: now,
-      expiresAt: expiresAt || null,
-      reason: result.reason || (expiresAt && now > expiresAt ? "expired" : "not-allowed")
-    });
-    lux_lockUI(result.reason || (expiresAt && now > expiresAt ? "access-expired" : "not-allowed"));
-    return false;
-  }
-
-  // if we’re here: live check says ALLOWED right now
   lux_setAccessCache({
     coneId,
-    allowed: true,
-    checkedAt: now,
-    expiresAt: expiresAt || null,
-    reason: "ok"
+    lastStatus: "allowed",
+    lastCheckMs: Date.now(),
+    expiresAt: expTs
   });
+
+  // Access granted *immediately* as soon as sheet says allowed
   return true;
 }
 
@@ -846,7 +831,7 @@ async function lux_ensureAccess() {
         const pool = [
           "I've got a few things to handle tonight",
           "I promised myself a quiet evening",
-          "I've got an early start and need to relax",
+          "I've got an early start and need to wind down",
           "I'm in the middle of small chores and bits",
           "I'm cooking and keeping it low-key",
           "My battery/data's tight so I’m keeping it light",
@@ -864,13 +849,13 @@ async function lux_ensureAccess() {
     async function modelRefusal(kind, profileCard, customerMsg){
       const tc = buildTimeContext();
       const sys = [
-        "You are an adult woman on a dating site. Natural, warm, concise.",
-        "No meetups/contacts/addresses; keep everything on-platform.",
-        "Be evasive and polite; avoid policy-ish wording.",
-        "Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.",
-        "Prefer neutral reasons: timing/early start, staying in, chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.",
-        "Avoid: 'oh', 'oh wow', 'flattered*', 'enthusiasm*/enthusaism*', 'sizzling', non-food 'spicy', and 'flirt*'.",
-        "End with one natural, flow-matching open-ended question created by you. No templates.",
+        `You are an adult woman on a dating site. Natural, warm, concise.`,
+        `No meetups/contacts/addresses; keep everything on-platform.`,
+        `Be evasive and polite; avoid policy-ish wording.`,
+        `Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.`,
+        `Prefer neutral reasons: timing/early start, staying in, errands/chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
+        `Avoid: "oh", "oh wow", "flattered*", "enthusiasm*/enthusaism*", "sizzling", non-food "spicy", and "flirt*".`,
+        `End with one natural, flow-matching open-ended question created by you. No templates.`,
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         (personaCardLine(profileCard)||'')
       ].join(' ');
@@ -884,7 +869,7 @@ async function lux_ensureAccess() {
       try { out = await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise); } catch {}
       out = deFamily(out||'', customerMsg);
       out = postFormat(out||'');
-      return out || "I'm keeping it here and low-key, thanks for understanding.";
+      return out || "I’m keeping it here and low-key, thanks for understanding.";
     }
 
     async function enforceNoMeetAccept(userMsg, text, profileCard){
