@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate • Vision Router)
 // @namespace http://tampermonkey.net/
-// @version 14.2.1
+// @version 14.3.
 // @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), ConeID-on-site match (prevents borrowed ConeID), adaptive history, persistent creative booster, vision router (last client image only), self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match https://myoperatorservice.com/*
 // @grant GM_getValue
