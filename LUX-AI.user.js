@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate • Vision Router)
 // @namespace http://tampermonkey.net/
-// @version 14.2.0
-// @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, vision router (last client image only), site ConeID match gate, age based occupation, vision caching, topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
+// @version 14.1.1
+// @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), ConeID-on-site match (prevents borrowed ConeID), adaptive history, persistent creative booster, vision router (last client image only), self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match https://myoperatorservice.com/*
 // @grant GM_getValue
 // @grant GM_setValue
@@ -19,35 +19,14 @@
 /* ============================
    LUX ConeID ACCESS CONTROL
    (STRICT: NO OFFLINE GRACE)
-   + Option C: ConeID on site must match typed ConeID
+   + ConeID-on-site MATCH
    ============================ */
 
 // IMPORTANT: your deployed Apps Script URL
 const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxBCywRTXBGE1AgLmOPON-xmcoMg09I7ETeUc6ih-U8vpqjWXOWfsVRkwRctZdh4nQ/exec";
 
-// NEW: ConeID selector on site (Option C)
-const CONEID_SITE_SELECTOR = '#app > main > div.flex-shrink-1 > nav > div:nth-child(3) > div > div.col-auto.navbar-text.fw-bold';
-const CONEID_SITE_SELECTOR_FALLBACK = 'nav .navbar-text.fw-bold';
-
-function lux_getConeIdOnSite() {
-  try {
-    const el = document.querySelector(CONEID_SITE_SELECTOR) || document.querySelector(CONEID_SITE_SELECTOR_FALLBACK);
-    const t = (el?.textContent || '').trim().toUpperCase().replace(/\s+/g, '');
-    return t || '';
-  } catch {
-    return '';
-  }
-}
-
-async function lux_waitForSiteConeId(ms = 3200, step = 200) {
-  const start = Date.now();
-  while (Date.now() - start < ms) {
-    const c = lux_getConeIdOnSite();
-    if (c) return c;
-    await new Promise(r => setTimeout(r, step));
-  }
-  return '';
-}
+// NEW: ConeID displayed on site (navbar)
+const SITE_CONEID_SELECTOR = '#app > main > div.flex-shrink-1 > nav > div:nth-child(3) > div > div.col-auto.navbar-text.fw-bold';
 
 // simple modal to request ConeID (only when none is saved)
 function lux_promptConeId() {
@@ -137,13 +116,33 @@ function lux_showErrorOverlay(msg) {
   }
 }
 
-// Apps Script call
+// NEW: read ConeID displayed on the site, wait a bit for DOM to settle
+async function lux_getSiteConeId(timeoutMs = 9000, intervalMs = 250) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const el = document.querySelector(SITE_CONEID_SELECTOR);
+    const raw = (el?.textContent || "").trim().toUpperCase();
+    const m = raw.match(/\bCONE[0-9A-Z]+\b/);
+    if (m && m[0]) return m[0];
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return "";
+}
+
+// Apps Script call (NOW includes site_coneid and mismatch enforcement)
 async function lux_checkOnlineAccess(coneId) {
   if (!ACCESS_API_ENDPOINT) {
     return { allowed: false, reason: "no-endpoint-configured" };
   }
   try {
-    const url = `${ACCESS_API_ENDPOINT}?coneid=${encodeURIComponent(coneId)}`;
+    const typed = String(coneId || "").trim().toUpperCase();
+    const siteConeId = await lux_getSiteConeId();
+
+    if (!siteConeId) return { allowed: false, reason: "site-coneid-missing" };
+    if (!typed) return { allowed: false, reason: "no-coneid" };
+    if (typed !== siteConeId) return { allowed: false, reason: "site-coneid-mismatch" };
+
+    const url = `${ACCESS_API_ENDPOINT}?coneid=${encodeURIComponent(typed)}&site_coneid=${encodeURIComponent(siteConeId)}`;
     const res = await fetch(url, { method: "GET" });
     if (!res.ok) {
       return { allowed: false, reason: "apps-script-http-" + res.status };
@@ -193,31 +192,7 @@ async function lux_ensureAccess() {
     cache = { coneId };
   }
 
-  // 1.5) NEW: Require site ConeID and force match (Option C)
-  const siteCone = await lux_waitForSiteConeId(3200, 200);
-  if (!siteCone) {
-    lux_setAccessCache({
-      coneId,
-      lastStatus: "denied",
-      lastCheckMs: Date.now(),
-      expiresAt: null
-    });
-    lux_lockUI("coneid-not-detected");
-    return false;
-  }
-  const typed = String(coneId || "").trim().toUpperCase().replace(/\s+/g, "");
-  if (typed !== siteCone) {
-    lux_setAccessCache({
-      coneId,
-      lastStatus: "denied",
-      lastCheckMs: Date.now(),
-      expiresAt: null
-    });
-    lux_lockUI("coneid-mismatch");
-    return false;
-  }
-
-  // 2) Always ask the Apps Script on every page load
+  // 2) Always ask the Apps Script on every page load (now also validates site coneid match)
   const result = await lux_checkOnlineAccess(coneId);
 
   if (!result || !result.allowed) {
@@ -450,139 +425,18 @@ async function lux_ensureAccess() {
   const PERSONA_MSG_SELECTOR = 'div.d-flex.flex-row.my-2';
   const MEMBER_TIME_SEL = 'span#memberTime.fw-bold';
 
-  // NEW: Age value selector you provided
-  const AGE_VALUE_SELECTOR = '#app > main > div.flex-grow-1.overflow-hidden > div.row.g-0.h-100 > div:nth-child(1) > div:nth-child(5) > table > tbody > tr:nth-child(2) > td:nth-child(2)';
-
   // ===== Utilities =====
   function _qs(r, s) { try { return s ? r.querySelector(s) : null; } catch { return null; } }
   function _qst(r, s) { const el = _qs(r, s); return el ? el.innerText.trim() : ''; }
   function extractBracketName(s) { if (!s) return ''; let m = s.match(/\(([^()]*)\)\s*$/); if (!m) m = s.match(/\(([^)]+)\)/); return (m && m[1]) ? m[1].trim() : ''; }
   function cleanOutsideName(s) { if (!s) return ''; return s.replace(/\s*\([^)]*\)\s*/g, '').trim(); }
-
-  function lux_getProfileAge() {
-    try {
-      const el = document.querySelector(AGE_VALUE_SELECTOR);
-      const n = parseInt((el?.textContent || '').trim(), 10);
-      if (Number.isFinite(n) && n >= 18 && n <= 99) return n;
-    } catch {}
-
-    try {
-      const rows = [...document.querySelectorAll('tr')];
-      for (const tr of rows) {
-        const cells = [...tr.querySelectorAll('td, th')];
-        if (cells.length < 2) continue;
-        const label = (cells[0].textContent || '').trim().toLowerCase();
-        if (label === 'age' || label.includes('age')) {
-          const n = parseInt((cells[1].textContent || '').trim(), 10);
-          if (Number.isFinite(n) && n >= 18 && n <= 99) return n;
-        }
-      }
-    } catch {}
-
-    return null;
-  }
-
-  function lux_hash32(s) {
-    let h = 2166136261;
-    const str = String(s || '');
-    for (let i = 0; i < str.length; i++) {
-      h ^= str.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return (h >>> 0);
-  }
-  function lux_pickStable(list, seedStr) {
-    if (!Array.isArray(list) || !list.length) return '';
-    const idx = lux_hash32(seedStr) % list.length;
-    return list[idx];
-  }
-  function lux_pickOccupationByAge(age, seedStr) {
-    const a = Number.isFinite(age) ? age : null;
-
-    const bucket_18_24 = [
-      "final year student and part time barista",
-      "junior customer support assistant",
-      "social media assistant",
-      "boutique sales assistant",
-      "front desk assistant",
-      "intern in an admin office"
-    ];
-
-    const bucket_25_34 = [
-      "project coordinator",
-      "customer success associate",
-      "marketing executive",
-      "HR associate",
-      "teacher",
-      "nurse"
-    ];
-
-    const bucket_35_44 = [
-      "operations lead",
-      "account manager",
-      "business analyst",
-      "school administrator",
-      "real estate consultant",
-      "program coordinator"
-    ];
-
-    const bucket_45_54 = [
-      "operations manager",
-      "HR manager",
-      "consultant",
-      "small business owner",
-      "property manager",
-      "community program manager"
-    ];
-
-    const bucket_55_64 = [
-      "consultant",
-      "small business owner",
-      "librarian",
-      "retired teacher doing light consulting",
-      "admin manager",
-      "nonprofit coordinator"
-    ];
-
-    const bucket_65_plus = [
-      "retired and doing a little consulting now and then",
-      "retired teacher",
-      "volunteer coordinator",
-      "community mentor",
-      "retired and enjoying quiet projects",
-      "semi retired consultant"
-    ];
-
-    let list = bucket_25_34;
-    if (a !== null) {
-      if (a >= 18 && a <= 24) list = bucket_18_24;
-      else if (a <= 34) list = bucket_25_34;
-      else if (a <= 44) list = bucket_35_44;
-      else if (a <= 54) list = bucket_45_54;
-      else if (a <= 64) list = bucket_55_64;
-      else list = bucket_65_plus;
-    }
-
-    return lux_pickStable(list, seedStr || String(a || 'seed'));
-  }
-
   function parseLeftProfile() {
     const rawName = _qst(document, PERSONA_NAME_SEL);
-    const realName = extractBracketName(rawName) || '';
-    const displayName = cleanOutsideName(rawName) || rawName;
-    const location = _qst(document, PERSONA_LOC_SEL) || 'nearby';
-
-    const age = lux_getProfileAge();
-    const seed = `${realName}|${displayName}|${age || ''}`;
-    const occupation = lux_pickOccupationByAge(age, seed);
-
     return {
       rawName,
-      realName,
-      displayName,
-      location,
-      age,
-      occupation
+      realName: extractBracketName(rawName) || '',
+      displayName: cleanOutsideName(rawName) || rawName,
+      location: _qst(document, PERSONA_LOC_SEL) || 'nearby'
     };
   }
 
@@ -988,8 +842,6 @@ async function lux_ensureAccess() {
       if (card.realName) bits.push(`RealName: ${card.realName}`);
       if (card.displayName) bits.push(`Username: ${card.displayName}`);
       if (card.location) bits.push(`Location: ${card.location}`);
-      if (Number.isFinite(card.age)) bits.push(`Age: ${card.age}`);
-      if (card.occupation) bits.push(`Work: ${card.occupation}`);
       return bits.length ? ` Persona card, ${bits.join(', ')}.` : '';
     }
 
@@ -1205,15 +1057,13 @@ async function lux_ensureAccess() {
     });
   }
 
-  // ===== System prompt (vision-aware + age-based occupation) =====
+  // ===== System prompt (vision-aware)
   function personaCardLine(card) {
     if (!card) return '';
     const bits = [];
     if (card.realName) bits.push(`RealName: ${card.realName}`);
     if (card.displayName) bits.push(`Username: ${card.displayName}`);
     if (card.location) bits.push(`Location: ${card.location}`);
-    if (Number.isFinite(card.age)) bits.push(`Age: ${card.age}`);
-    if (card.occupation) bits.push(`Work: ${card.occupation}`);
     return bits.length ? ` Persona card, ${bits.join(', ')}.` : '';
   }
 
@@ -1224,7 +1074,6 @@ async function lux_ensureAccess() {
 
     const baseCore = [
       "You are an adult woman (she her) on a dating site.",
-      leftCard && leftCard.occupation ? `Your work is ${leftCard.occupation}.` : "",
       "Your tone is natural, warm, feminine and relaxed, never robotic.",
       "Your primary goal is to build deep, engaging rapport through short, unique messages.",
       "Write like a real person. Avoid repetitive phrases. Vary sentence structure and word choice.",
@@ -1237,7 +1086,6 @@ async function lux_ensureAccess() {
       "If you need to decline something, do it briefly and pivot into a new interesting topic.",
       "Excuses can be everyday reasons like work focus, rest, timing, small chores, or low battery, avoid family excuses unless the customer mentions family first.",
       "Picture requests: always accept picture requests in a soft, platform safe way. Do not refuse or deflect them. Vary wording so it does not sound templated.",
-      "If asked what you do for work, answer consistently with your work.",
       "Safety: never share or ask for contacts or handles, no meetups, dates, drinks, or coffee, keep everything on platform.",
       "Location asks: share only city, never an address or specific area.",
       "Name asks: use the real name from the profile parentheses when giving your name.",
@@ -1245,7 +1093,7 @@ async function lux_ensureAccess() {
       "Form: one short paragraph, no emojis, about 70 to 150 words, with an 800 character cap.",
       `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
       "End with exactly one natural open ended question that fits the flow."
-    ].filter(Boolean).join(" ");
+    ].join(" ");
 
     let flavor = "";
     if (modelName.startsWith("x-ai/grok-4")) {
@@ -1410,13 +1258,6 @@ async function lux_ensureAccess() {
     return { summary: String(raw || '').slice(0, 260), visible_details: [], mood_vibe: "", uncertainties: ["parse_failed"] };
   }
 
-  // NEW: vision cache to speed regenerate and repeats
-  let lastVisionCacheKey = '';
-  let lastVisionCacheObj = null;
-
-  // ===== Intent helpers =====
-  const wantsPics = (q) => /\b(pics?|pictures?|photos?|selfie|images?|gallery|more\s+pictures?)\b/i.test((q || '').toLowerCase());
-
   // ===== Backend call =====
   async function callBackend(msgText, imageDataUrl = '') {
     if (!lux_canSendRequest()) return;
@@ -1459,18 +1300,10 @@ async function lux_ensureAccess() {
       showReplies([out]); pushHist(rawMsg, out); return;
     }
 
-    // ===== Vision-first (only if we have last client image data url)
-    // NEW: cached vision for speed
+    // ===== Vision-first (only if we have last client image data url) =====
     let vision = null;
     if (imageDataUrl) {
-      const cacheKey = String(imageDataUrl).slice(0, 160);
-      if (cacheKey && cacheKey === lastVisionCacheKey && lastVisionCacheObj) {
-        vision = lastVisionCacheObj;
-      } else {
-        try { vision = await lux_visionAnalyze(imageDataUrl, rawMsg); } catch { vision = null; }
-        lastVisionCacheKey = cacheKey;
-        lastVisionCacheObj = vision;
-      }
+      try { vision = await lux_visionAnalyze(imageDataUrl, rawMsg); } catch { vision = null; }
     }
 
     // Normal path — OpenRouter direct (TEXT uses lux_model unchanged)
@@ -1478,7 +1311,6 @@ async function lux_ensureAccess() {
     const chosenModel = (GM_getValue('lux_model', MODEL_DEFAULT) || MODEL_DEFAULT).trim();
     const basePreset = getModelPreset(chosenModel);
 
-    // IMPORTANT: make the text model coherent with image by passing vision as a compact section
     const visionBlock = vision ? `\n\nVISION, ${JSON.stringify(vision)}` : '';
     const userText = rawMsg + visionBlock;
 
@@ -1695,18 +1527,6 @@ async function lux_ensureAccess() {
       if (src) imgDataUrl = await lux_fetchImageAsDataUrl(src);
     } catch { imgDataUrl = ''; }
     lastSeenImageDataUrl = imgDataUrl || '';
-
-    // NEW: reset vision cache when new image arrives
-    if (lastSeenImageDataUrl) {
-      const k = String(lastSeenImageDataUrl).slice(0, 160);
-      if (k !== lastVisionCacheKey) {
-        lastVisionCacheKey = '';
-        lastVisionCacheObj = null;
-      }
-    } else {
-      lastVisionCacheKey = '';
-      lastVisionCacheObj = null;
-    }
 
     if (turns.length) { shortHistory = turns.slice(-HISTORY_MAX); _saveHistory(); }
 
