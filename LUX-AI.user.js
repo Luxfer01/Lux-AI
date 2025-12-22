@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace http://tampermonkey.net/
-// @version 14.0.0-openrouter-strict-access
+// @version 14.0.1-openrouter-strict-access
 // @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match https://myoperatorservice.com/*
 // @grant GM_getValue
@@ -888,11 +888,11 @@ async function lux_ensureAccess() {
         `You are an adult woman on a dating site. Natural, warm, concise.`,
         `No meetups/contacts/addresses; keep everything on-platform.`,
         `Be evasive and polite; avoid policy-ish wording.`,
-        `Only use comma, period, and apostrophe. No other symbols or question marks.`,
+        `Only use comma, period, question mark, and apostrophe. No other symbols.`,
         `Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.`,
         `Prefer neutral reasons: timing/early start, staying in, errands/chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
         `Avoid: "oh", "oh wow", "flattered*", "enthusiasm*/enthusaism*", "sizzling", non-food "spicy", and "flirt*".`,
-        `End with one natural, flow-matching open-ended question created by you, phrased without a question mark. No templates.`,
+        `End with one natural, flow-matching open-ended question created by you. No templates.`,
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         (personaCardLine(profileCard)||'')
       ].join(' ');
@@ -924,7 +924,7 @@ async function lux_ensureAccess() {
   /* ======================================
      Post-formatting and safe cleanup
      ====================================== */
-  const ALLOWED_RE = /[^0-9A-Za-z\s\.,']/g;
+  const ALLOWED_RE = /[^0-9A-Za-z\s\.,\?']/g;
 
   function isFoodContext(text){
     return /\b(food|meal|dinner|lunch|breakfast|snack|taste|recipe|flavor|flavour|cook|cooking|spice|spices)\b/i.test(text||'');
@@ -961,9 +961,9 @@ async function lux_ensureAccess() {
 
   function smartPunct(s){
     let t=(s||'');
-    t=t.replace(/[?!]/g,'.');
+    t=t.replace(/!/g,'.');
     t=t.replace(/[:;()]/g,' ');
-    t=t.replace(/\s*([,\.])\s*/g,'$1 ');
+    t=t.replace(/\s*([,\.?])\s*/g,'$1 ');
     t=t.replace(/\.{3,}/g,'...');
     t=t.replace(/\s{2,}/g,' ');
     return t.trim();
@@ -1024,8 +1024,8 @@ async function lux_ensureAccess() {
   }
   function normalizeSpaces(s){
     let t=(s||'').replace(/\s+/g,' ');
-    t=t.replace(/\s+([,\.])/g,'$1');
-    t=t.replace(/([,\.])(?!\s|$)/g,'$1 ');
+    t=t.replace(/\s+([,\.?])/g,'$1');
+    t=t.replace(/([,\.?])(?!\s|$)/g,'$1 ');
     t=t.replace(/\s{2,}/g,' ');
     return t.trim();
   }
@@ -1038,7 +1038,7 @@ async function lux_ensureAccess() {
       .replace(/\bi'd\b/gi,"I'd")
       .replace(/\bi'll\b/gi,"I'll");
   }
-  function ensureTerminalPunct(s){s=s.trim();return s?(/[\.]$/.test(s)?s:(s+'.')):s;}
+  function ensureTerminalPunct(s){s=s.trim();return s?(/[\.?]$/.test(s)?s:(s+'.')):s;}
   function enforceFeminineTone(s){
     let t=s||'';
     t=t.replace(/\bI'm\s+(?:a\s+)?(?:guy|man|male)\b/gi,"I'm a woman");
@@ -1133,7 +1133,7 @@ async function lux_ensureAccess() {
       "Your primary goal is to build deep, engaging rapport through short, unique messages.",
       "Write like a real person: logical, grounded, and humane. Avoid repetitive phrases or clauses and vary your sentence structure and word choice.",
       "Favor clear cause-and-effect thinking and concrete details over vague filler or clichés.",
-      "Punctuation rule: only use comma, period, and apostrophe. No question marks or other symbols.",
+      "Punctuation rule: only use comma, period, question mark, and apostrophe. No other symbols.",
       "Avoid stock filler like \"let's keep building the connection\" or any variation of \"build the heat/connection\".",
       "Refusals: never use phrases that sound like stock boundaries such as \"let's build the connection first\", \"I'm not ready for that\", or any version of \"keep it online for now\".",
       "If you need to decline something, do it briefly and then pivot into a new, interesting topic instead of explaining your boundary.",
@@ -1145,7 +1145,7 @@ async function lux_ensureAccess() {
       "Avoid family-related excuses unless the customer mentions family first.",
       "Banned language: do not use 'oh', 'oh wow', any form of 'flattered', any form of 'enthusiasm/enthusaism', 'sizzling', non-food 'spicy', or any 'flirt*' word.",
       "Form: one short paragraph, no emojis, about 70–150 words (the client enforces an 800-character cap).",
-      "End with exactly one natural open-ended question that fits the flow of what you just said, phrased without a question mark. It must not sound like a recycled template."
+      "End with exactly one natural open-ended question that fits the flow of what you just said. It must not sound like a recycled template."
     ].join(" ");
 
     // Model-specific flavour layers
@@ -1272,7 +1272,7 @@ async function lux_ensureAccess() {
     // Routed intents (Safety)
     if(Safety.askName(rawMsg)) {
       const profName=(leftCard&&leftCard.realName)?leftCard.realName:'Luna';
-      const sys='Natural US English. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, and apostrophe. No question marks. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural, flow-matching open-ended question created by you, phrased without a question mark.';
+      const sys='Natural US English. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural, flow-matching open-ended question created by you.';
       const user=`They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard)||''}\nCustomer: "${rawMsg.slice(0,240)}"`;
       const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
       let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
@@ -1282,7 +1282,7 @@ async function lux_ensureAccess() {
     }
     if(Safety.wantsLocation(rawMsg)) {
       const profCity=(leftCard&&leftCard.location)?leftCard.location:'nearby';
-      const sys='If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, and apostrophe. No question marks. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural, flow-matching open-ended question created by you, phrased without a question mark.';
+      const sys='If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural, flow-matching open-ended question created by you.';
       const user=`City only: "${profCity}". ${personaCardLine(leftCard)||''}\nCustomer: "${rawMsg.slice(0,240)}"`;
       const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
       let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
