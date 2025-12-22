@@ -484,6 +484,33 @@ async function lux_ensureAccess() {
       location: _qst(document,PERSONA_LOC_SEL)||'nearby'
     };
   }
+  function getImageNotes(node){
+    if (!node) return [];
+    const imgs = [...node.querySelectorAll('img')];
+    const notes = [];
+    imgs.forEach(img => {
+      const alt = (img.getAttribute('alt') || '').trim();
+      const src = (img.getAttribute('src') || '').trim();
+      let name = '';
+      if (src) {
+        const clean = src.split('?')[0];
+        name = clean.split('/').pop() || '';
+      }
+      const parts = [];
+      if (alt) parts.push(`alt text ${alt}`);
+      if (name) parts.push(`file ${name}`);
+      if (parts.length) notes.push(parts.join(', '));
+      else notes.push('image attached');
+    });
+    return notes;
+  }
+  function extractMessageContent(node){
+    const text = (node?.innerText || '').trim();
+    const imageNotes = getImageNotes(node);
+    if (!imageNotes.length) return text;
+    const imageText = `Image attached. ${imageNotes.map(n => `Image note ${n}`).join('. ')}.`;
+    return text ? `${text} ${imageText}` : imageText;
+  }
   function personaCardLine(card){
     if(!card) return '';
     const bits=[]; if(card.realName) bits.push(`RealName: ${card.realName}`);
@@ -1134,11 +1161,13 @@ async function lux_ensureAccess() {
       "Write like a real person: logical, grounded, and humane. Avoid repetitive phrases or clauses and vary your sentence structure and word choice.",
       "Favor clear cause-and-effect thinking and concrete details over vague filler or clichés.",
       "Punctuation rule: only use comma, period, question mark, and apostrophe. No other symbols.",
+      "Always respond to the latest customer message. If image notes are present, reference only what they say.",
       "Avoid stock filler like \"let's keep building the connection\" or any variation of \"build the heat/connection\".",
       "Refusals: never use phrases that sound like stock boundaries such as \"let's build the connection first\", \"I'm not ready for that\", or any version of \"keep it online for now\".",
       "If you need to decline something, do it briefly and then pivot into a new, interesting topic instead of explaining your boundary.",
       "Excuses can be everyday reasons like work focus, rest, timing, errands, or low battery, avoid family excuses unless the customer mentions family first.",
       "Picture requests: always accept picture requests in a soft, platform-safe way. Do not refuse or deflect them. Vary your wording so it does not sound templated or repeated between chats.",
+      "If the message includes image notes, acknowledge the picture and reference what is mentioned in those notes. Do not claim details that are not stated and do not include URLs.",
       "Safety: never share or ask for contacts/handles; no meetups, dates, drinks, or coffee; keep everything on-platform.",
       "Location asks: share only city, never an address or specific area.",
       "Name asks: use the real name from the profile parentheses when giving your name.",
@@ -1485,8 +1514,8 @@ async function lux_ensureAccess() {
     const turns=[];
     for(const row of nodes){
       const fromClient=row.matches(CLIENT_MSG_SELECTOR);
-      const text=(row.innerText||'').trim();
-      if(text) turns.push({role: fromClient?'user':'assistant', content: stripTimestamps(text)});
+      const content=extractMessageContent(row);
+      if(content) turns.push({role: fromClient?'user':'assistant', content: stripTimestamps(content)});
     }
     const lastUser = turns.slice().reverse().find(t=>t.role==='user');
     if(!lastUser) return;
