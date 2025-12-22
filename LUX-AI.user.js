@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate • Vision Router)
 // @namespace http://tampermonkey.net/
-// @version 14.1.0
-// @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, vision router (last client image only), self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
+// @version 14.2.0
+// @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, vision router (last client image only), self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question. Added ConeID on-page match gate + age-fit occupation.
 // @match https://myoperatorservice.com/*
 // @grant GM_getValue
 // @grant GM_setValue
@@ -19,10 +19,64 @@
 /* ============================
    LUX ConeID ACCESS CONTROL
    (STRICT: NO OFFLINE GRACE)
+   + On-page ConeID match gate
    ============================ */
 
 // IMPORTANT: your deployed Apps Script URL
 const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxBCywRTXBGE1AgLmOPON-xmcoMg09I7ETeUc6ih-U8vpqjWXOWfsVRkwRctZdh4nQ/exec";
+
+const LUX_ACCESS_CACHE_KEY_V3 = "lux_access_cache_v3";
+
+function lux_getAccessCache() {
+  try {
+    const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V3, "");
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !obj.coneId) return null;
+    return obj;
+  } catch {
+    return null;
+  }
+}
+function lux_setAccessCache(data) {
+  try {
+    GM_setValue(LUX_ACCESS_CACHE_KEY_V3, JSON.stringify(data || {}));
+  } catch (e) {
+    console.warn("LUX access store error", e);
+  }
+}
+function lux_clearAccessCache() {
+  try { GM_setValue(LUX_ACCESS_CACHE_KEY_V3, ""); } catch { }
+}
+
+// ---- ConeID on-page detection ----
+// Fast selector you provided, plus robust fallbacks
+const LUX_PAGE_CONE_SELECTORS = [
+  'div.col-auto.navbar-text.fw-bold',
+  '#app > main > div.flex-shrink-1 > nav > div:nth-child(3) > div > div.col-auto.navbar-text.fw-bold'
+];
+
+function lux_getPageConeId() {
+  try {
+    for (const sel of LUX_PAGE_CONE_SELECTORS) {
+      const el = document.querySelector(sel);
+      const raw = (el?.textContent || "").trim().toUpperCase();
+      if (raw && /^CONE[A-Z0-9]+$/.test(raw)) return raw;
+      if (raw && raw.startsWith("CONE")) return raw;
+    }
+  } catch { }
+  return "";
+}
+
+async function lux_waitForPageConeId(timeoutMs = 12000, pollMs = 250) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const cid = lux_getPageConeId();
+    if (cid) return cid;
+    await new Promise(r => setTimeout(r, pollMs));
+  }
+  return "";
+}
 
 // simple modal to request ConeID (only when none is saved)
 function lux_promptConeId() {
@@ -37,7 +91,9 @@ function lux_promptConeId() {
     `;
     wrapper.innerHTML = `
       <div style="font-size:22px;margin-bottom:10px;">LUX access</div>
-      <div style="font-size:16px;margin-bottom:10px;">Enter your ConeID to continue:</div>
+      <div style="font-size:14px;margin-bottom:10px;opacity:.9;max-width:420px;text-align:center;line-height:1.35;">
+        Enter your ConeID. It must match the ConeID shown on this page.
+      </div>
       <input id="lux_cone_input" style="padding:8px 10px;font-size:18px;border-radius:6px;border:1px solid #3c4c66;min-width:220px;text-align:center;background:#111;color:#fff;">
       <button id="lux_cone_btn" style="margin-top:12px;padding:8px 18px;font-size:16px;border-radius:6px;border:0;background:#0b3d91;color:#fff;font-weight:600;cursor:pointer;">Submit</button>
     `;
@@ -67,7 +123,45 @@ function lux_lockUI(reason) {
     display:flex;align-items:center;justify-content:center;
     text-align:center;padding:32px;font-size:18px;
   `;
-  div.textContent = `LUX access blocked: ${reason || "not whitelisted or license server unreachable"}.`;
+
+  const inner = document.createElement("div");
+  inner.style.cssText = `
+    max-width:520px;background:#111;border-radius:14px;
+    border:1px solid #0b3d91;padding:18px 18px 14px;
+  `;
+
+  const title = document.createElement("div");
+  title.style.cssText = "font-size:18px;font-weight:800;margin-bottom:8px;";
+  title.textContent = "LUX access blocked";
+
+  const body = document.createElement("div");
+  body.style.cssText = "font-size:14px;line-height:1.45;opacity:.95;margin-bottom:14px;";
+  body.textContent = `Reason: ${reason || "not whitelisted or license server unreachable"}.`;
+
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;gap:10px;justify-content:center;flex-wrap:wrap;";
+
+  const changeBtn = document.createElement("button");
+  changeBtn.textContent = "Change ConeID";
+  changeBtn.style.cssText = "padding:8px 14px;border-radius:10px;border:0;background:#0b3d91;color:#fff;font-weight:700;cursor:pointer;";
+  changeBtn.onclick = () => {
+    lux_clearAccessCache();
+    location.reload();
+  };
+
+  const reloadBtn = document.createElement("button");
+  reloadBtn.textContent = "Reload";
+  reloadBtn.style.cssText = "padding:8px 14px;border-radius:10px;border:0;background:#303741;color:#eaeaea;font-weight:700;cursor:pointer;";
+  reloadBtn.onclick = () => location.reload();
+
+  row.appendChild(changeBtn);
+  row.appendChild(reloadBtn);
+
+  inner.appendChild(title);
+  inner.appendChild(body);
+  inner.appendChild(row);
+  div.appendChild(inner);
+
   document.body.appendChild(div);
 }
 
@@ -130,34 +224,25 @@ async function lux_checkOnlineAccess(coneId) {
   }
 }
 
-// v3 access cache – just remembers coneId + last state, NO GRACE
-// structure: { coneId, lastStatus, lastCheckMs, expiresAt }
-const LUX_ACCESS_CACHE_KEY_V3 = "lux_access_cache_v3";
-
-function lux_getAccessCache() {
-  try {
-    const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V3, "");
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    if (!obj || !obj.coneId) return null;
-    return obj;
-  } catch {
-    return null;
-  }
-}
-function lux_setAccessCache(data) {
-  try {
-    GM_setValue(LUX_ACCESS_CACHE_KEY_V3, JSON.stringify(data || {}));
-  } catch (e) {
-    console.warn("LUX access store error", e);
-  }
-}
-
-// STRICT gate: always re-check server, but never re-prompt ConeID unless missing
+// STRICT gate: must match on-page ConeID + always re-check server, never re-prompt unless missing or user taps Change ConeID
 async function lux_ensureAccess() {
   let cache = lux_getAccessCache();
 
-  // 1) Ensure we have a ConeID (prompt once, then reuse)
+  // 0) Read ConeID from page (anti-sharing)
+  const pageConeId = await lux_waitForPageConeId();
+  if (!pageConeId) {
+    lux_setAccessCache({
+      coneId: (cache && cache.coneId) ? cache.coneId : "",
+      pageConeId: "",
+      lastStatus: "denied",
+      lastCheckMs: Date.now(),
+      expiresAt: null
+    });
+    lux_lockUI("coneid-not-detected-on-page");
+    return false;
+  }
+
+  // 1) Ensure we have a typed ConeID (prompt once, then reuse)
   let coneId = cache && cache.coneId;
   if (!coneId) {
     coneId = await lux_promptConeId();
@@ -168,6 +253,19 @@ async function lux_ensureAccess() {
     cache = { coneId };
   }
 
+  // 1.5) Must match what the site shows
+  if (String(coneId).trim().toUpperCase() !== String(pageConeId).trim().toUpperCase()) {
+    lux_setAccessCache({
+      coneId,
+      pageConeId,
+      lastStatus: "denied",
+      lastCheckMs: Date.now(),
+      expiresAt: null
+    });
+    lux_lockUI("coneid-mismatch");
+    return false;
+  }
+
   // 2) Always ask the Apps Script on every page load
   const result = await lux_checkOnlineAccess(coneId);
 
@@ -175,6 +273,7 @@ async function lux_ensureAccess() {
     const reason = result && result.reason ? result.reason : "not-allowed";
     lux_setAccessCache({
       coneId,
+      pageConeId,
       lastStatus: "denied",
       lastCheckMs: Date.now(),
       expiresAt: null
@@ -191,6 +290,7 @@ async function lux_ensureAccess() {
   }
   lux_setAccessCache({
     coneId,
+    pageConeId,
     lastStatus: "allowed",
     lastCheckMs: Date.now(),
     expiresAt: expTs
@@ -414,6 +514,148 @@ async function lux_ensureAccess() {
       displayName: cleanOutsideName(rawName) || rawName,
       location: _qst(document, PERSONA_LOC_SEL) || 'nearby'
     };
+  }
+
+  // ---- Age detection + occupation picker ----
+  const LUX_OCC_KEY_PREFIX = "lux_occ_v1__";
+
+  function lux_detectProfileAge() {
+    try {
+      const nameEl = document.querySelector(PERSONA_NAME_SEL);
+      if (!nameEl) return null;
+
+      const candidates = [];
+      const blocks = [];
+      blocks.push(nameEl.parentElement);
+      blocks.push(nameEl.closest('div'));
+      blocks.push(nameEl.parentElement?.parentElement);
+      blocks.push(nameEl.parentElement?.nextElementSibling);
+      blocks.push(document.querySelector(PERSONA_LOC_SEL)?.parentElement);
+
+      const seen = new Set();
+      for (const b of blocks) {
+        if (!b) continue;
+        const key = b;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const txt = (b.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!txt) continue;
+
+        // Try explicit patterns first
+        let m = txt.match(/\b(age|yrs|years?)\s*[:\-]?\s*(\d{2})\b/i);
+        if (m && m[2]) {
+          const a = parseInt(m[2], 10);
+          if (a >= 18 && a <= 99) return a;
+        }
+        m = txt.match(/\b(\d{2})\s*(?:yrs|years?)\b/i);
+        if (m && m[1]) {
+          const a = parseInt(m[1], 10);
+          if (a >= 18 && a <= 99) return a;
+        }
+
+        // Fallback: any 2-digit number near the profile header
+        const nums = (txt.match(/\b(\d{2})\b/g) || []).map(x => parseInt(x, 10));
+        nums.forEach(n => { if (n >= 18 && n <= 99) candidates.push(n); });
+      }
+
+      if (candidates.length) return candidates[0];
+    } catch { }
+    return null;
+  }
+
+  function lux_pickFrom(arr, seedStr) {
+    const a = Array.isArray(arr) ? arr.filter(Boolean) : [];
+    if (!a.length) return '';
+    const s = String(seedStr || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h) + s.charCodeAt(i);
+    h = Math.abs(h);
+    return a[h % a.length];
+  }
+
+  function lux_chooseOccupationForAge(age, seed) {
+    const a = Number(age || 0);
+
+    const teenYoung = [
+      "a student",
+      "a college student",
+      "a junior assistant at an office",
+      "an intern in administration",
+      "a customer support assistant"
+    ];
+    const early = [
+      "a customer support agent",
+      "an office administrator",
+      "a social media manager",
+      "a project coordinator",
+      "a junior accountant",
+      "a nurse assistant",
+      "a teacher",
+      "a sales executive",
+      "a HR assistant"
+    ];
+    const mid = [
+      "an office manager",
+      "a teacher",
+      "a nurse",
+      "an accountant",
+      "a business owner",
+      "a project manager",
+      "a lawyer",
+      "a human resources manager",
+      "a procurement officer",
+      "a banker"
+    ];
+    const senior = [
+      "a consultant",
+      "a business owner",
+      "a school administrator",
+      "a senior nurse",
+      "a senior accountant",
+      "a lecturer",
+      "a legal consultant",
+      "a civil servant",
+      "a clinic administrator"
+    ];
+    const older = [
+      "a consultant",
+      "a retired teacher",
+      "a retired civil servant",
+      "a mentor and tutor",
+      "a part time consultant",
+      "a community coordinator",
+      "a small business owner"
+    ];
+
+    let pool = early;
+    if (a && a < 23) pool = teenYoung;
+    else if (a && a < 33) pool = early;
+    else if (a && a < 46) pool = mid;
+    else if (a && a < 61) pool = senior;
+    else if (a && a >= 61) pool = older;
+
+    // If age is unknown, choose a safe, broad option
+    if (!a) pool = [
+      "an office administrator",
+      "a customer support agent",
+      "a teacher",
+      "a business owner",
+      "a project coordinator"
+    ];
+
+    return lux_pickFrom(pool, seed || (String(a) + "_lux_occ")) || "an office administrator";
+  }
+
+  function lux_getStableOccupation(leftCard) {
+    const age = lux_detectProfileAge();
+    const key = LUX_OCC_KEY_PREFIX + (leftCard?.rawName || leftCard?.displayName || "unknown").slice(0, 80);
+    const saved = (GM_getValue(key, '') || '').trim();
+    if (saved) return { occupation: saved, age: age || null };
+
+    const seed = `${leftCard?.rawName || ''}|${leftCard?.location || ''}|${age || ''}`;
+    const occ = lux_chooseOccupationForAge(age, seed);
+    GM_setValue(key, occ);
+    return { occupation: occ, age: age || null };
   }
 
   // NOTE: This patch strips inline image notes from captured text.
@@ -1237,6 +1479,7 @@ async function lux_ensureAccess() {
 
   // ===== Intent helpers =====
   const wantsPics = (q) => /\b(pics?|pictures?|photos?|selfie|images?|gallery|more\s+pictures?)\b/i.test((q || '').toLowerCase());
+  const wantsWork = (q) => /\b(what\s+do\s+you\s+do|what\s+do\s+you\s+do\s+for\s+work|what\s+is\s+your\s+job|your\s+job|your\s+work|what\s+work\s+do\s+you\s+do|occupation|career|what\s+do\s+you\s+do\s+for\s+a\s+living)\b/i.test((q || '').toLowerCase());
 
   // ===== Backend call =====
   async function callBackend(msgText, imageDataUrl = '') {
@@ -1246,7 +1489,7 @@ async function lux_ensureAccess() {
     const rawMsg = stripTimestamps(stripInlineImageNotes((msgText || '').toString()));
     window.__LUX_LAST_USER = rawMsg;
 
-    // Routed intents (Safety)
+    // Routed intents (Safety + Work)
     if (Safety.askName(rawMsg)) {
       const profName = (leftCard && leftCard.realName) ? leftCard.realName : 'Luna';
       const sys = "Natural US English. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, flirt. End with one natural open ended question.";
@@ -1257,6 +1500,7 @@ async function lux_ensureAccess() {
       line = postFormat(line);
       showReplies([line]); pushHist(rawMsg, line); return;
     }
+
     if (Safety.wantsLocation(rawMsg)) {
       const profCity = (leftCard && leftCard.location) ? leftCard.location : 'nearby';
       const sys = "If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, flirt. End with one natural open ended question.";
@@ -1267,6 +1511,32 @@ async function lux_ensureAccess() {
       line = postFormat(line);
       showReplies([line]); pushHist(rawMsg, line); return;
     }
+
+    // NEW: Work / occupation routing (age-fit, stable per profile)
+    if (wantsWork(rawMsg)) {
+      const occInfo = lux_getStableOccupation(leftCard);
+      const occ = occInfo.occupation || "an office administrator";
+      const ageNote = occInfo.age ? `Profile age: ${occInfo.age}.` : "Profile age unknown.";
+      const sys = [
+        "You are an adult woman on a dating site.",
+        "Answer what you do for work in a natural, human way, 1 short paragraph.",
+        "Use this occupation exactly, do not invent a different job: " + occ + ".",
+        ageNote,
+        "No contacts or meetups. No emojis.",
+        "Only use comma, period, question mark, and apostrophe. No other symbols.",
+        "Avoid family excuses unless user mentioned family first.",
+        "Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, flirt.",
+        "End with one natural open ended question."
+      ].join(' ');
+
+      const user = `Customer: "${rawMsg.slice(0, 240)}"`;
+      const concise = { max_tokens: 120, temperature: 0.35, top_p: 0.9 };
+      let line = await llmCall([{ role: 'system', content: sys }, { role: 'user', content: user }], concise);
+      line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
+      line = postFormat(line);
+      showReplies([line]); pushHist(rawMsg, line); return;
+    }
+
     if (Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
       let out = await Safety.modelRefusal('meet', leftCard, rawMsg);
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
