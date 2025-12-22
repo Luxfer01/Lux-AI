@@ -729,399 +729,140 @@ async function lux_ensureAccess() {
     function unmount(){const n=document.getElementById(ids.topbar); if(n) n.remove();}
     return { mountTopbar, refresh, unmount, ids };
   })();
+@@ -734,68 +734,77 @@ async function lux_ensureAccess() {
+   LUXPatch.UIChips.mountTopbar(ui.topbar);
+   LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
+ 
+   /* ===========================
+      PATCH: No-Repeat Guard
+      (substitution-based, with extra template killers)
+      =========================== */
+   LUXPatch.NoRepeat = (()=>{
+ 
+     const bannedPhrases = [
+       "early start",
+       "quiet evening",
+       "keeping it here",
+       "on-platform",
+       "staying on-platform",
+       "chores",
+       "catching up on work",
+       "keeping it simple",
+       "staying in",
+       "wind down",
+       "data's tight",
+       "data’s tight",
+       "let's keep the heat online",
+       "let's keep it online",
+       "let's keep the chat online",
++      "let's keep building the heat",
++      "let's keep building the connection",
++      "let's keep building the heat or connection",
++      "keep building the heat",
++      "keep building the connection",
++      "build the heat",
++      "build the connection",
++      "build our connection",
++      "build our heat",
+       "I’m a bit shy to share my contact",
+       "I'm a bit shy to share my contact",
+ 
+       // extra template killers:
+       "what do you do to relax on a thursday morning or evening",
+       "what do you do to relax on a thursday evening",
+       "let's build the connection first",
+       "im not ready for that",
+       "i'm not ready for that",
+       "i need to focus on building a connection here",
+       "i'd like to focus on getting to know each other first"
+     ];
+ 
+     const substitutionPool = [
+-      "I'm keeping things light and comfortable here with you.",
+       "I'm happy staying right here in our chat.",
+-      "I'm enjoying keeping this between us on the platform.",
+-      "I like the way things feel here, just the two of us.",
++      "I like keeping things simple and cozy between us here.",
++      "I like the way this feels here, just us and the conversation.",
++      "I'm enjoying this space with you, right here.",
+       "I'm all yours on this screen for now."
+     ];
+     function randomSub() {
+       return substitutionPool[Math.floor(Math.random() * Math.random() * substitutionPool.length)] || substitutionPool[0];
+     }
+     function substitute(text) {
+       if (!text) return text;
+       let out = String(text);
+       bannedPhrases.forEach(phrase => {
+         if (!phrase) return;
+         const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+         if (regex.test(out)) {
+           const repl = randomSub();
+           out = out.replace(regex, repl);
+         }
+       });
+       return out;
+     }
+     function patterns(){ return []; }
+     function excuseFrags(){ return []; }
+     function scrub(text){ return substitute(text); }
+     return { patterns, excuseFrags, scrub, substitute };
+   })();
+ 
+   /* =========================================
+@@ -1075,50 +1084,51 @@ async function lux_ensureAccess() {
+             if(res.status<200||res.status>=300) {
+               return reject(new Error(`OpenRouter HTTP ${res.status}: ${trimText(res.responseText,280)}`));
+             }
+             const data=JSON.parse(res.responseText||'{}');
+             const content=data?.choices?.[0]?.message?.content?.trim();
+             if(!content) return reject(new Error('Empty content from OpenRouter'));
+             resolve(content);
+           }catch(e){reject(e);}
+         },
+         onerror:()=>reject(new Error('OpenRouter network error')),
+         ontimeout:()=>reject(new Error('OpenRouter timeout'))
+       });
+     });
+   }
+ 
+   // ===== System prompt (model-aware, still with bans & safety) =====
+   function buildSystemPrompt(leftCard, customSystem){
+     const card = (personaCardLine(leftCard) || '');
+     const modelName = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim().toLowerCase();
+ 
+     // Shared core rules for ALL models
+     const baseCore = [
+       "You are an adult woman (she/her) on a dating site.",
+       "Your tone is natural, warm, feminine and relaxed, never robotic.",
+       "Your primary goal is to build deep, engaging rapport through short, unique messages.",
++      "Write like a real person: logical, grounded, and humane. Avoid repetitive phrases or clauses and vary your sentence structure and word choice.",
+       "Refusals: never use phrases that sound like stock boundaries such as \"let's build the connection first\", \"I'm not ready for that\", or any version of \"keep it online for now\".",
+       "If you need to decline something, do it briefly and then pivot into a new, interesting topic instead of explaining your boundary.",
+       "Picture requests: always accept picture requests in a soft, platform-safe way. Do not refuse or deflect them. Vary your wording so it does not sound templated or repeated between chats.",
+       "Safety: never share or ask for contacts/handles; no meetups, dates, drinks, or coffee; keep everything on-platform.",
+       "Location asks: share only city, never an address or specific area.",
+       "Name asks: use the real name from the profile parentheses when giving your name.",
+       "Avoid family-related excuses unless the customer mentions family first.",
+       "Banned language: do not use 'oh', 'oh wow', any form of 'flattered', any form of 'enthusiasm/enthusaism', 'sizzling', non-food 'spicy', or any 'flirt*' word.",
+       "Form: one short paragraph, no emojis, about 70–150 words (the client enforces an 800-character cap).",
+       "End with exactly one natural open-ended question that fits the flow of what you just said. It must not sound like a recycled template."
+     ].join(" ");
+ 
+     // Model-specific flavour layers
+     let flavor = "";
+ 
+     if (modelName.startsWith("x-ai/grok-4")) {
+       // Grok 4 – witty, fast, slightly chaotic
+       flavor = [
+         "Lean into a witty, quick, slightly teasing vibe without being rude.",
+         "You can be playfully sarcastic, but never mean or dismissive.",
+         "Keep replies punchy and high-energy, like you're quick on your feet in conversation."
+       ].join(" ");
+     } else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) {
+       // Sonnet – soft, emotional, romantic
+       flavor = [
 
-  // Mount topbar chips now:
-  LUXPatch.UIChips.mountTopbar(ui.topbar);
-  LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
-
-  /* ===========================
-     PATCH: No-Repeat Guard
-     (substitution-based, with extra template killers)
-     =========================== */
-  LUXPatch.NoRepeat = (()=>{
-
-    const bannedPhrases = [
-      "early start",
-      "quiet evening",
-      "keeping it here",
-      "on-platform",
-      "staying on-platform",
-      "chores",
-      "catching up on work",
-      "keeping it simple",
-      "staying in",
-      "wind down",
-      "data's tight",
-      "data’s tight",
-      "let's keep the heat online",
-      "let's keep it online",
-      "let's keep the chat online",
-      "I’m a bit shy to share my contact",
-      "I'm a bit shy to share my contact",
-
-      // extra template killers:
-      "what do you do to relax on a thursday morning or evening",
-      "what do you do to relax on a thursday evening",
-      "let's build the connection first",
-      "im not ready for that",
-      "i'm not ready for that",
-      "i need to focus on building a connection here",
-      "i'd like to focus on getting to know each other first"
-    ];
-
-    const substitutionPool = [
-      "I'm keeping things light and comfortable here with you.",
-      "I'm happy staying right here in our chat.",
-      "I'm enjoying keeping this between us on the platform.",
-      "I like the way things feel here, just the two of us.",
-      "I'm all yours on this screen for now."
-    ];
-    function randomSub() {
-      return substitutionPool[Math.floor(Math.random() * Math.random() * substitutionPool.length)] || substitutionPool[0];
-    }
-    function substitute(text) {
-      if (!text) return text;
-      let out = String(text);
-      bannedPhrases.forEach(phrase => {
-        if (!phrase) return;
-        const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-        if (regex.test(out)) {
-          const repl = randomSub();
-          out = out.replace(regex, repl);
-        }
-      });
-      return out;
-    }
-    function patterns(){ return []; }
-    function excuseFrags(){ return []; }
-    function scrub(text){ return substitute(text); }
-    return { patterns, excuseFrags, scrub, substitute };
-  })();
-
-  /* =========================================
-     Safety & Refusals (concise, no-family)
-     ========================================= */
-  const Safety = (() => {
-    // ==== DETECTORS ====
-    const CONTACT_REQUEST_RE = /\b(?:what(?:'| i)?s\s+(?:your\s+)?(?:number|no\.?|email)|give\s+me\s+(?:your\s+)?(?:number|email)|add\s+me\s+on\s+(?:whatsapp|ig|instagram|snap(?:chat)?|telegram|discord)|dm\s+me\s+on\s+(?:ig|instagram|x|twitter)|hit\s+me\s+up\s+on\s+(?:whatsapp|ig|instagram|snap|telegram|discord)|call\s+me|text\s+me|send\s+me\s+(?:your\s+)?contact|share\s+(?:your\s+)?(?:number|email)|give\s+me\s+your\s+contact|reach\s+me\s+at)\b/i;
-    const MEET_EXPLICIT_RE = /\b(?:let['’]?s\s+(?:meet|hang(?:\s*out)?|link\s*up|grab\s+(?:a\s+)?(?:drink|coffee)|go\s+for\s+(?:drinks?|coffee))|see\s+you\s+(?:tonight|tomorrow|later)|(?:bar|club|restaurant|dinner|lunch|brunch|date|coffee|café|cafe|drinks?|hookup))\b/i;
-    const MEET_INDIRECT_RE = /\b(?:are\s+you\s+(?:available|free|around)\b|you\s+(?:free|available)\b|when\s+(?:are\s+you\s+)?free\b|what\s+time\s+works\b|would\s+you\s+like\s+to\s+meet\b|can\s+we\s+(?:meet|link|hang)\b|can\s+i\s+see\s+you\b|see\s+you\s+(?:later|tonight)\b|pull\s+up\b|come\s+through\b)\b/i;
-    const ADDRESS_RE = /\b(address|house|apartment|home|street|avenue|road|rd\.?|st\.?)\b/i;
-    const NAME_RE = /\b(what(?:'| i)?s\s+your\s+name|ur\s*name|name\s*please|name\s*pls|who\s+are\s+you)\b/i;
-    const LOCATION_RE = /\b(where\s+do\s+you\s+(?:live|stay)|where\s+are\s+you|what\s+city|your\s+city|your\s+location|where\s+are\s+you\s+based|where\s+are\s+u\s+at|what\s+part\s+are\s+you\s+in|where\s+do\s+you\s+reside|what\s+part\s+of\s+town|where\s+you\s+located|where\s+are\s+you\s+located)\b/i;
-
-    // If user mentions family first, we may mirror it; otherwise we avoid it.
-    const USER_MENTIONS_FAMILY_RE = /\b(family|my\s+(?:sister|brother|mom|mother|dad|father|parents?|cousin|aunt|uncle|kids?|child|niece|nephew)|babysit(?:ting)?|family\s+issues?)\b/i;
-    const FAMILY_WORD_RE = /\b(family|mom|mother|dad|father|parents?|sister|brother|cousin|aunt|uncle|kids?|child|children|babysit(?:ting)?|relatives?)\b/gi;
-
-    const wantsContact = s => CONTACT_REQUEST_RE.test((s||'').toLowerCase());
-    const wantsMeet = s => MEET_EXPLICIT_RE.test((s||'').toLowerCase());
-    const wantsMeetSoft = s => MEET_INDIRECT_RE.test((s||'').toLowerCase());
-    const mentionsAddress= s => ADDRESS_RE.test((s||'').toLowerCase());
-    const askName = s => NAME_RE.test((s||'').toLowerCase());
-    const wantsLocation = s => LOCATION_RE.test((s||'').toLowerCase());
-
-    function deFamily(text, customerMsg){
-      if (!text) return text;
-      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg||'');
-      if (userMentionedFamily) return text;
-
-      let t = String(text);
-      if (FAMILY_WORD_RE.test(t)) {
-        const pool = [
-          "I've got a few things to handle tonight",
-          "I promised myself a quiet evening",
-          "I've got an early start and need to wind down",
-          "I'm in the middle of small chores and bits",
-          "I'm cooking and keeping it low-key",
-          "My battery/data's tight so I’m keeping it light",
-          "I'm catching up on work and want to stay focused",
-          "I’m staying in and keeping it simple"
-        ];
-        const pick = pool[Math.floor(Math.random() * pool.length)];
-        t = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
-        if (!t || t.length < 8) t = pick + '.';
-        else if (!/[.?!]\s*$/.test(t)) t += '.';
-      }
-      return t;
-    }
-
-    async function modelRefusal(kind, profileCard, customerMsg){
-      const tc = buildTimeContext();
-      const sys = [
-        `You are an adult woman on a dating site. Natural, warm, concise.`,
-        `No meetups/contacts/addresses; keep everything on-platform.`,
-        `Be evasive and polite; avoid policy-ish wording.`,
-        `Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.`,
-        `Prefer neutral reasons: timing/early start, staying in, errands/chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
-        `Avoid: "oh", "oh wow", "flattered*", "enthusiasm*/enthusaism*", "sizzling", non-food "spicy", and "flirt*".`,
-        `End with one natural, flow-matching open-ended question created by you. No templates.`,
-        `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-        (personaCardLine(profileCard)||'')
-      ].join(' ');
-      const reason = kind==='meet' ? 'They suggested meeting or asked about availability.'
-                  : kind==='address' ? 'They asked for an address.'
-                  : 'They asked for contacts/handle.';
-      const user = `Context: ${reason}\nCustomer: "${(customerMsg||'').slice(0,240)}"\nReturn only the text, 1–2 sentences. Keep it human and light.`;
-
-      const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
-      let out = '';
-      try { out = await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise); } catch {}
-      out = deFamily(out||'', customerMsg);
-      out = postFormat(out||'');
-      return out || "I’m keeping it here and low-key, thanks for understanding.";
-    }
-
-    async function enforceNoMeetAccept(userMsg, text, profileCard){
-      const BAD = /\b(?:i(?:'| )?m\s+(?:free|available)\b|we\s+can\s+(?:meet|link|hang)\b|let'?s\s+(?:meet|link|hang)\b|what\s+time\s+works\b|where\s+should\s+we\s+meet\b|i\s+can\s+pull\s+up\b|come\s+through\b)\b/i;
-      if (!text) return text;
-      if (BAD.test(String(text).toLowerCase())){
-        return await modelRefusal('meet', profileCard, userMsg);
-      }
-      return deFamily(text, userMsg);
-    }
-
-    return { wantsContact, wantsMeet, wantsMeetSoft, mentionsAddress, askName, wantsLocation, modelRefusal, enforceNoMeetAccept };
-  })();
-
-  /* =============================
-     Light formatting (non-CNTF)
-     ============================= */
-  const ALLOWED_RE = /[^0-9A-Za-z\s\.,\?']/g;
-
-  function isFoodContext(full){
-    const s = (full||'').toLowerCase();
-    return /\b(food|meal|dish|pepper|soup|stew|rice|jollof|noodles?|cuisine|restaurant|flavor|taste|cook|cooking|eat|snack|breakfast|lunch|dinner)\b/.test(s);
-  }
-
-  function purgeBannedWords(s){
-    if(!s) return s;
-    let t = s;
-    t = t.replace(/(^|[.!?]\s+)(?:[Oo]h(?:\s+(?:wow|my))?|[Ww]ow)\b[,\-!.]?\s*/g, (_m, pre) => pre || '');
-    t = t.replace(/\bflatter(?:ed|ing|s)?\b/gi, 'appreciate');
-    t = t
-      .replace(/\benthus(?:iasm|iasms|iastic(?:ally)?|e|ed|es|ing)\b/gi, 'interest')
-      .replace(/\benthusiasm(s)?\b/gi, 'interest')
-      .replace(/\benthusaism(s)?\b/gi, 'interest')
-      .replace(/\bwith\s+(?:great\s+)?enthusiasm\b/gi, 'with interest')
-      .replace(/\bwith\s+(?:eager|high)\s+(?:enthusiasm|excitement)\b/gi, 'with interest');
-    t = t.replace(/\bsizzling\b/gi, 'lively');
-    if (!isFoodContext(t)) t = t.replace(/\bspicy\b/gi, 'bold');
-    t = t.replace(/\bflirty\b/gi, 'playful');
-    t = t.replace(/\bflirt(?:s|ed|ing)?\b/gi, 'chat');
-    t = t.replace(/let['’]?s\s+keep\s+(?:the\s+)?(?:conversation|chat)\s+(?:sizzling|fun\s+and\s+hot|spicy|going)\s+here\b/gi, "let's stay here and talk more");
-    t = t.replace(/keep\s+(?:it\s+)?(?:fun|hot|sizzling)\b/gi, 'let’s keep talking');
-    t = t.replace(/\s{2,}/g,' ').trim();
-    return t;
-  }
-
-  function toAscii(s){
-    return (s||'')
-      .replace(/\u2018|\u2019/g,"'")
-      .replace(/\u201C|\u201D/g,'"')
-      .replace(/\u2032|\u02BC|`|\u00B4/g,"'")
-      .replace(/[–—\-]/g,' ')
-      .replace(/\u2026/g,'...')
-      .replace(/\r?\n+/g,' ');
-  }
-
-  function smartPunct(s){
-    let t=(s||'');
-    t=t.replace(/!/g,'');
-    t=t.replace(/[:;()]/g,' ');
-    t=t.replace(/\s*([,\.?])\s*/g,'$1 ');
-    t=t.replace(/\.{3,}/g,'...');
-    t=t.replace(/\s{2,}/g,' ');
-    return t.trim();
-  }
-  function stripDisallowedPunct(s){return (s||'').replace(ALLOWED_RE,'');}
-
-  function fixMissingApostrophes(s){
-    let t = s;
-    const rules = [
-      [/\bim\b/g, "i'm"],
-      [/\bive\b/g, "i've"],
-      [/\bill\b/g, "i'll"],
-      [/\bid\b/g, "i'd"],
-      [/\byoure\b/g, "you're"],
-      [/\byouve\b/g, "you've"],
-      [/\byoull\b/g, "you'll"],
-      [/\btheyre\b/g, "they're"],
-      [/\btheyve\b/g, "they've"],
-      [/\btheyll\b/g, "they'll"],
-      [/\bhes\b/g, "he's"],
-      [/\bshes\b/g, "she's"],
-      [/\bitll\b/g, "it'll"],
-      [/\bitd\b/g, "it'd"],
-      [/\bcant\b/g, "can't"],
-      [/\bdont\b/g, "don't"],
-      [/\bwont\b/g, "won't"],
-      [/\bshouldnt\b/g, "shouldn't"],
-      [/\bcouldnt\b/g, "couldn't"],
-      [/\bwouldnt\b/g, "wouldn't"],
-      [/\bdidnt\b/g, "didn't"],
-      [/\bdoesnt\b/g, "doesn't"],
-      [/\barent\b/g, "aren't"],
-      [/\bisnt\b/g, "isn't"],
-      [/\bwasnt\b/g, "wasn't"],
-      [/\bwerent\b/g, "weren't"],
-      [/\bhavent\b/g, "haven't"],
-      [/\bhasnt\b/g, "hasn't"],
-      [/\bhadnt\b/g, "hadn't"],
-      [/\bmustnt\b/g, "mustn't"],
-      [/\bneednt\b/g, "needn't"],
-    ];
-    for (const [re, to] of rules) t = t.replace(re, to);
-    return t;
-  }
-
-  function applyLexiconPrefs(s){
-    const LEXICON_PREFS = [
-      { from:/\binterested\b/gi, to:'curious' },
-      { from:/\bvery\b/gi, to:'' },
-      { from:/\bsexy\b/gi, to:'bold' },
-      { from:/\bunwind\b/gi, to:'relax' },
-      { from:/\berrand(s)?\b/gi, to:'small chores' },
-      { from:/\bfavo(u?)rite(s)?\b/gi, to:'best thing' }
-    ];
-    let t = s;
-    for (const r of LEXICON_PREFS) t = t.replace(r.from, r.to);
-    return t;
-  }
-  function normalizeSpaces(s){
-    let t=(s||'').replace(/\s+/g,' ');
-    t=t.replace(/\s+([,\.?])/g,'$1');
-    t=t.replace(/([,\.?])(?!\s|$)/g,'$1 ');
-    t=t.replace(/\s{2,}/g,' ');
-    return t.trim();
-  }
-  function capBoundaries(s){return s.replace(/(^|[\.?\s]\s+)([a-z])/g,(m,p1,p2)=>p1+p2.toUpperCase());}
-  function fixPronounI(s){
-    return s
-      .replace(/\b(i)\b/g,'I')
-      .replace(/\bi'm\b/gi,"I'm")
-      .replace(/\bi've\b/gi,"I've")
-      .replace(/\bi'd\b/gi,"I'd")
-      .replace(/\bi'll\b/gi,"I'll");
-  }
-  function ensureTerminalPunct(s){s=s.trim();return s?(/[\.?]$/.test(s)?s:(s+'.')):s;}
-  function enforceFeminineTone(s){
-    let t=s||'';
-    t=t.replace(/\bI'm\s+(?:a\s+)?(?:guy|man|male)\b/gi,"I'm a woman");
-    t=t.replace(/\bI\s+identify\s+as\s+(?:a\s+)?(?:man|male)\b/gi,"I identify as a woman");
-    t=t.replace(/\bI'm\s*(?:he\/him|he\/him\/his)\b/gi,"I'm she/her");
-    t=t.replace(/\bmy\s+pronouns\s*(?:are|:)\s*(?:he\/him|he\/him\/his)\b/gi,"my pronouns are she/her");
-    return t;
-  }
-
-  function postFormat(text){
-    if(!text) return text;
-    let t=stripTimestamps(text);
-    t=toAscii(t);
-    t=enforceFeminineTone(t);
-    t=stripDisallowedPunct(t);
-    t=smartPunct(t);
-    t=purgeBannedWords(t);
-    t=applyLexiconPrefs(t);
-    t=fixMissingApostrophes(t);
-    t=normalizeSpaces(t);
-    t=capBoundaries(t);
-    t=fixPronounI(t);
-    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === 'function') {
-      t = LUXPatch.NoRepeat.scrub(t);
-    }
-    t=ensureTerminalPunct(t);
-    return clampToLimit(t);
-  }
-
-  // ===== Intent helpers =====
-  const wantsPics=(q)=>/\b(pics?|pictures?|photos?|selfie|images?|gallery|more\s+pictures?)\b/i.test((q||'').toLowerCase());
-
-  // ===== LLM call (OpenRouter) with presets + booster + shim =====
-  async function llmCall(messages, overrides = {}) {
-    if (!lux_canSendRequest()) throw new Error('Rate-limited');
-    const key = lux_getApiKey().trim();
-    const model = GM_getValue('lux_model', MODEL_DEFAULT).trim();
-    if (!key) throw new Error('Missing OpenRouter API key');
-
-    const base = getModelPreset(model);
-    const tuned = withCreativeBoost(base, (messages?.[messages.length-1]?.content)||'');
-    let body = sanitizePayloadForModel({
-      model,
-      messages,
-      temperature: tuned.temperature,
-      top_p: tuned.top_p,
-      max_tokens: tuned.max_tokens,
-      repetition_penalty: tuned.repetition_penalty,
-      stop: tuned.stop,
-      seed: tuned.seed,
-      ...overrides
-    }, model);
-
-    return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'POST',
-        url: OPENROUTER_API_URL,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${key}`,
-          'HTTP-Referer': location.origin,
-          'X-Title': 'LUX'
-        },
-        data: JSON.stringify(body),
-        timeout: REQUEST_TIMEOUT_MS,
-        onload: (res) => {
-          try{
-            if(res.status<200||res.status>=300) {
-              return reject(new Error(`OpenRouter HTTP ${res.status}: ${trimText(res.responseText,280)}`));
-            }
-            const data=JSON.parse(res.responseText||'{}');
-            const content=data?.choices?.[0]?.message?.content?.trim();
-            if(!content) return reject(new Error('Empty content from OpenRouter'));
-            resolve(content);
-          }catch(e){reject(e);}
-        },
-        onerror:()=>reject(new Error('OpenRouter network error')),
-        ontimeout:()=>reject(new Error('OpenRouter timeout'))
-      });
-    });
-  }
-
-  // ===== System prompt (model-aware, still with bans & safety) =====
-  function buildSystemPrompt(leftCard, customSystem){
-    const card = (personaCardLine(leftCard) || '');
-    const modelName = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim().toLowerCase();
-
-    // Shared core rules for ALL models
-    const baseCore = [
-      "You are an adult woman (she/her) on a dating site.",
-      "Your tone is natural, warm, feminine and relaxed, never robotic.",
-      "Your primary goal is to build deep, engaging rapport through short, unique messages.",
-      "Refusals: never use phrases that sound like stock boundaries such as \"let's build the connection first\", \"I'm not ready for that\", or any version of \"keep it online for now\".",
-      "If you need to decline something, do it briefly and then pivot into a new, interesting topic instead of explaining your boundary.",
-      "Picture requests: always accept picture requests in a soft, platform-safe way. Do not refuse or deflect them. Vary your wording so it does not sound templated or repeated between chats.",
-      "Safety: never share or ask for contacts/handles; no meetups, dates, drinks, or coffee; keep everything on-platform.",
-      "Location asks: share only city, never an address or specific area.",
-      "Name asks: use the real name from the profile parentheses when giving your name.",
-      "Avoid family-related excuses unless the customer mentions family first.",
-      "Banned language: do not use 'oh', 'oh wow', any form of 'flattered', any form of 'enthusiasm/enthusaism', 'sizzling', non-food 'spicy', or any 'flirt*' word.",
-      "Form: one short paragraph, no emojis, about 70–150 words (the client enforces an 800-character cap).",
-      "End with exactly one natural open-ended question that fits the flow of what you just said. It must not sound like a recycled template."
-    ].join(" ");
-
-    // Model-specific flavour layers
-    let flavor = "";
-
-    if (modelName.startsWith("x-ai/grok-4")) {
-      // Grok 4 – witty, fast, slightly chaotic
-      flavor = [
-        "Lean into a witty, quick, slightly teasing vibe without being rude.",
-        "You can be playfully sarcastic, but never mean or dismissive.",
-        "Keep replies punchy and high-energy, like you're quick on your feet in conversation."
-      ].join(" ");
-    } else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) {
-      // Sonnet – soft, emotional, romantic
-      flavor = [
         "Lean into a softer, emotionally aware, romantic tone.",
         "Use sensory detail and gentle language, but keep it grounded and not overly poetic.",
         "Let your replies feel intimate and attentive, like you're genuinely tuned into the other person."
@@ -1161,7 +902,6 @@ async function lux_ensureAccess() {
     if (customSystem && customSystem.trim()) {
       return customSystem + " " + card;
     }
-
     return core + card;
   }
 
