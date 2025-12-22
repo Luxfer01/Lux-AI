@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace http://tampermonkey.net/
-// @version 14.0.3-openrouter-strict-access
+// @version 14.0.3
 // @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match https://myoperatorservice.com/*
 // @grant GM_getValue
@@ -504,8 +504,17 @@ async function lux_ensureAccess() {
     });
     return notes;
   }
+  function stripInlineImageNotes(text){
+    if (!text) return '';
+    let t = String(text);
+    t = t.replace(/\bmessage\b\s*image\s+attached\.?/gi, '');
+    t = t.replace(/\bimage\s+attached\.?/gi, '');
+    t = t.replace(/\bimage\s+note\b[^.]*\.?/gi, '');
+    return t.replace(/\s{2,}/g, ' ').trim();
+  }
   function extractMessageContent(node){
-    const text = (node?.innerText || '').trim();
+    const rawText = (node?.innerText || '').trim();
+    const text = stripInlineImageNotes(rawText);
     const imageNotes = getImageNotes(node);
     if (!imageNotes.length) return text;
     const imageText = `Image attached. ${imageNotes.map(n => `Image note ${n}`).join('. ')}.`;
@@ -1162,6 +1171,7 @@ async function lux_ensureAccess() {
       "Your tone is natural, warm, feminine and relaxed, never robotic.",
       "Your primary goal is to build deep, engaging rapport through short, unique messages.",
       "Write like a real person: logical, grounded, and humane. Avoid repetitive phrases or clauses and vary your sentence structure and word choice.",
+      "Keep the tone soft, empathetic, and gently reassuring. Sound calm, caring, and thoughtful.",
       "Favor clear cause-and-effect thinking and concrete details over vague filler or clichés.",
       "Punctuation rule: only use comma, period, question mark, and apostrophe. No other symbols.",
       "Always respond to the latest customer message. If image notes are present, reference only what they say.",
