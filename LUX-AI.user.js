@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace http://tampermonkey.net/
-// @version 14.0.1-openrouter-strict-access
+// @version 14.0.3-openrouter-strict-access
 // @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match https://myoperatorservice.com/*
 // @grant GM_getValue
@@ -1000,37 +1000,37 @@ async function lux_ensureAccess() {
   function fixMissingApostrophes(s){
     let t = s;
     const rules = [
-      [/\bim\b/g, "i'm"],
-      [/\bive\b/g, "i've"],
-      [/\bill\b/g, "i'll"],
-      [/\bid\b/g, "i'd"],
-      [/\byoure\b/g, "you're"],
-      [/\byouve\b/g, "you've"],
-      [/\byoull\b/g, "you'll"],
-      [/\btheyre\b/g, "they're"],
-      [/\btheyve\b/g, "they've"],
-      [/\btheyll\b/g, "they'll"],
-      [/\bhes\b/g, "he's"],
-      [/\bshes\b/g, "she's"],
-      [/\bitll\b/g, "it'll"],
-      [/\bitd\b/g, "it'd"],
-      [/\bcant\b/g, "can't"],
-      [/\bdont\b/g, "don't"],
-      [/\bwont\b/g, "won't"],
-      [/\bshouldnt\b/g, "shouldn't"],
-      [/\bcouldnt\b/g, "couldn't"],
-      [/\bwouldnt\b/g, "wouldn't"],
-      [/\bdidnt\b/g, "didn't"],
-      [/\bdoesnt\b/g, "doesn't"],
-      [/\barent\b/g, "aren't"],
-      [/\bisnt\b/g, "isn't"],
-      [/\bwasnt\b/g, "wasn't"],
-      [/\bwerent\b/g, "weren't"],
-      [/\bhavent\b/g, "haven't"],
-      [/\bhasnt\b/g, "hasn't"],
-      [/\bhadnt\b/g, "hadn't"],
-      [/\bmustnt\b/g, "mustn't"],
-      [/\bneednt\b/g, "needn't"],
+      [/\bim\b/gi, "I'm"],
+      [/\bive\b/gi, "I've"],
+      [/\bill\b/gi, "I'll"],
+      [/\bid\b/gi, "I'd"],
+      [/\byoure\b/gi, "you're"],
+      [/\byouve\b/gi, "you've"],
+      [/\byoull\b/gi, "you'll"],
+      [/\btheyre\b/gi, "they're"],
+      [/\btheyve\b/gi, "they've"],
+      [/\btheyll\b/gi, "they'll"],
+      [/\bhes\b/gi, "he's"],
+      [/\bshes\b/gi, "she's"],
+      [/\bitll\b/gi, "it'll"],
+      [/\bitd\b/gi, "it'd"],
+      [/\bcant\b/gi, "can't"],
+      [/\bdont\b/gi, "don't"],
+      [/\bwont\b/gi, "won't"],
+      [/\bshouldnt\b/gi, "shouldn't"],
+      [/\bcouldnt\b/gi, "couldn't"],
+      [/\bwouldnt\b/gi, "wouldn't"],
+      [/\bdidnt\b/gi, "didn't"],
+      [/\bdoesnt\b/gi, "doesn't"],
+      [/\barent\b/gi, "aren't"],
+      [/\bisnt\b/gi, "isn't"],
+      [/\bwasnt\b/gi, "wasn't"],
+      [/\bwerent\b/gi, "weren't"],
+      [/\bhavent\b/gi, "haven't"],
+      [/\bhasnt\b/gi, "hasn't"],
+      [/\bhadnt\b/gi, "hadn't"],
+      [/\bmustnt\b/gi, "mustn't"],
+      [/\bneednt\b/gi, "needn't"],
     ];
     for (const [re, to] of rules) t = t.replace(re, to);
     return t;
@@ -1078,6 +1078,8 @@ async function lux_ensureAccess() {
   function postFormat(text){
     if(!text) return text;
     let t=stripTimestamps(text);
+    t=t.replace(/image attached\.?/gi,'');
+    t=t.replace(/image note[^.]*\.?/gi,'');
     t=toAscii(t);
     t=enforceFeminineTone(t);
     t=stripDisallowedPunct(t);
@@ -1152,6 +1154,7 @@ async function lux_ensureAccess() {
   function buildSystemPrompt(leftCard, customSystem){
     const card = (personaCardLine(leftCard) || '');
     const modelName = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim().toLowerCase();
+    const tc = buildTimeContext();
 
     // Shared core rules for ALL models
     const baseCore = [
@@ -1174,6 +1177,7 @@ async function lux_ensureAccess() {
       "Avoid family-related excuses unless the customer mentions family first.",
       "Banned language: do not use 'oh', 'oh wow', any form of 'flattered', any form of 'enthusiasm/enthusaism', 'sizzling', non-food 'spicy', or any 'flirt*' word.",
       "Form: one short paragraph, no emojis, about 70–150 words (the client enforces an 800-character cap).",
+      `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
       "End with exactly one natural open-ended question that fits the flow of what you just said. It must not sound like a recycled template."
     ].join(" ");
 
