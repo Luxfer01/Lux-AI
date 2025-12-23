@@ -806,7 +806,7 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
   ui.excuseViaModel.checked = GM_getValue("lux_excuse_via_model", 1) === 1;
   ui.filterEnabled.checked = !!GM_getValue("lux_filter_enabled", 0);
 
-  // ===== Model picker (TEXT only) =====
+  // ===== Model picker (TEXT + VISION) =====
   const modelChoices = [
     "x-ai/grok-4-fast",
     "anthropic/claude-3.5-sonnet",
@@ -814,6 +814,17 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     "meta-llama/llama-3.3-8b-instruct:free",
     "meta-llama/llama-3.3-70b-instruct:free",
   ];
+
+  // Added: image models under text models (used automatically when last client message has an image)
+  const visionModelChoices = [
+    "openai/gpt-4.1-mini",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "google/gemini-2.0-flash",
+    "google/gemini-2.0-pro",
+    "anthropic/claude-3.5-sonnet",
+  ];
+
   let LUXSettingsDirty = false;
 
   // ===== Timestamp stripper =====
@@ -888,12 +899,16 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
   LUXPatch.UIChips.mountTopbar(ui.topbar);
 
   function renderModelButtons() {
-    const cur = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
+    const curText = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
+    const curVision = (GM_getValue("lux_model_vision", MODEL_VISION_DEFAULT) || "").trim();
+
     const p = ui.modelsPanel;
     p.innerHTML = "";
+
+    // TEXT section
     const head = document.createElement("div");
     head.style.marginBottom = "6px";
-    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || "default"}</span>`;
+    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">text: ${curText || "default"}</span>`;
     p.appendChild(head);
 
     modelChoices.forEach((m) => {
@@ -918,7 +933,39 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
       });
       p.appendChild(b);
     });
+
+    // Divider
+    const hr = document.createElement("div");
+    hr.style.cssText = "margin:10px 0;border-top:1px dashed #3c4c66;";
+    p.appendChild(hr);
+
+    // VISION section (added)
+    const head2 = document.createElement("div");
+    head2.style.marginBottom = "6px";
+    head2.innerHTML = `<strong>Pick a vision model</strong> <span class="lux-tag">vision: ${curVision || MODEL_VISION_DEFAULT}</span>`;
+    p.appendChild(head2);
+
+    visionModelChoices.forEach((m) => {
+      const b = document.createElement("button");
+      b.className = "lux-model";
+      b.textContent = m;
+      b.addEventListener("click", () => {
+        ui.modelVision.value = m;
+        GM_setValue("lux_model_vision", m);
+        LUXSettingsDirty = true;
+        notify("Vision model set to " + m);
+        renderModelButtons();
+      });
+      p.appendChild(b);
+    });
+
+    // Note (kept tiny)
+    const note = document.createElement("div");
+    note.style.cssText = "margin-top:6px;font-size:12px;color:#9fb7dd;";
+    note.textContent = "Vision model is used automatically when the last client message contains an image.";
+    p.appendChild(note);
   }
+
   function toggleModelsPanel() {
     const p = ui.modelsPanel;
     const open = getComputedStyle(p).display !== "none" && getComputedStyle(p).visibility !== "hidden";
@@ -1664,7 +1711,7 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
       return;
     }
 
-    // Vision-first if we have image
+    // Vision-first if we have image (auto switches by presence of imageDataUrl)
     let vision = null;
     if (imageDataUrl) {
       try {
@@ -1961,7 +2008,7 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     ui.customer.focus();
     LUXPatch.UIChips.refresh({ modelLabel: ui.model.value || "default" });
 
-    // Auto call with last image only
+    // Auto call with last image only (vision auto-switch happens when imageDataUrl exists)
     callBackend(content, lastSeenImageDataUrl);
   }
 
