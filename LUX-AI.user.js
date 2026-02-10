@@ -1,44 +1,32 @@
 // ==UserScript==
-// @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Match • Vision Router)
+// @name LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace http://tampermonkey.net/
-// @version 14.2.0
-// @description LUX: encrypted OpenRouter key, strict Apps Script access, ConeID must match site ConeID when available, hides on dashboard until verified, stays available across dashboard once verified (until expiry), adaptive history, persistent creative booster, vision router (last client image only), age-aware occupation, faster and more reliable Apps Script + image fetching, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
+// @version 14.0.4
+// @description Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, self-aware picture acceptance (no canned lines), topbar chips, bans preserved (“oh/oh wow”, “flattered*”, “enthusiasm* / enthusaism*”, non-food “spicy”, “flirt*”), soft-bans (“unwind / errands / favorite”), no-family excuses unless user mentions family first, no contacts/meetups, 800-char cap, one natural open-ended question.
 // @match https://myoperatorservice.com/*
 // @grant GM_getValue
 // @grant GM_setValue
 // @grant GM_notification
 // @grant GM_xmlhttpRequest
+// @connect 127.0.0.1
+// @connect localhost
 // @connect openrouter.ai
 // @connect api.openrouter.ai
 // @connect script.google.com
-// @connect script.googleusercontent.com
-// @connect googleusercontent.com
 // @run-at document-end
 // ==/UserScript==
 
 /* ============================
    LUX ConeID ACCESS CONTROL
-   - Hidden on dashboard until verified
-   - Verify when thread activity appears
-   - ConeID must match site ConeID when selector is present
-   - Uses SAME endpoint
+   (STRICT: NO OFFLINE GRACE)
    ============================ */
 
 // IMPORTANT: your deployed Apps Script URL
-const ACCESS_API_ENDPOINT =
-  "https://script.google.com/macros/s/AKfycbxBCywRTXBGE1AgLmOPON-xmcoMg09I7ETeUc6ih-U8vpqjWXOWfsVRkwRctZdh4nQ/exec";
-
-// ConeID selector(s)
-const SITE_CONEID_SELECTOR_PRIMARY =
-  "#app > main > div.flex-shrink-1 > nav > div:nth-child(3) > div > div.col-auto.navbar-text.fw-bold";
-
-// Access cache (v4) structure:
-// { coneId, lastStatus: "allowed"|"denied", lastCheckMs, expiresAt, lastSiteConeId }
-const LUX_ACCESS_CACHE_KEY_V4 = "lux_access_cache_v4";
+const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxBCywRTXBGE1AgLmOPON-xmcoMg09I7ETeUc6ih-U8vpqjWXOWfsVRkwRctZdh4nQ/exec";
 
 // simple modal to request ConeID (only when none is saved)
 function lux_promptConeId() {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const wrapper = document.createElement("div");
     wrapper.style.cssText = `
       position:fixed;inset:0;z-index:999999;
@@ -63,13 +51,13 @@ function lux_promptConeId() {
       wrapper.remove();
       resolve(val);
     };
-    input.addEventListener("keydown", (e) => {
+    input.addEventListener("keydown", e => {
       if (e.key === "Enter") btn.click();
     });
   });
 }
 
-// hard lock overlay – used when license is invalid / expired / mismatch
+// hard lock overlay – used when license is invalid / expired / unreachable
 function lux_lockUI(reason) {
   const div = document.createElement("div");
   div.style.cssText = `
@@ -99,7 +87,7 @@ function lux_showErrorOverlay(msg) {
     `;
     const inner = document.createElement("div");
     inner.style.cssText = `
-      max-width:440px;background:#111;border-radius:12px;
+      max-width:420px;background:#111;border-radius:12px;
       border:1px solid #0b3d91;padding:20px;
     `;
     const title = document.createElement("div");
@@ -107,12 +95,11 @@ function lux_showErrorOverlay(msg) {
     title.textContent = "LUX connection issue";
     const body = document.createElement("div");
     body.id = "lux-error-body";
-    body.style.cssText = "font-size:14px;line-height:1.4;margin-bottom:16px;white-space:pre-wrap;";
+    body.style.cssText = "font-size:14px;line-height:1.4;margin-bottom:16px;";
     body.textContent = msg;
     const btn = document.createElement("button");
     btn.textContent = "Close";
-    btn.style.cssText =
-      "padding:6px 14px;border-radius:8px;border:0;background:#0b3d91;color:#fff;font-weight:600;cursor:pointer;";
+    btn.style.cssText = "padding:6px 14px;border-radius:8px;border:0;background:#0b3d91;color:#fff;font-weight:600;cursor:pointer;";
     btn.onclick = () => div.remove();
     inner.appendChild(title);
     inner.appendChild(body);
@@ -125,10 +112,31 @@ function lux_showErrorOverlay(msg) {
   }
 }
 
-// Access cache helpers
+// Apps Script call
+async function lux_checkOnlineAccess(coneId) {
+  if (!ACCESS_API_ENDPOINT) {
+    return { allowed: false, reason: "no-endpoint-configured" };
+  }
+  try {
+    const url = `${ACCESS_API_ENDPOINT}?coneid=${encodeURIComponent(coneId)}`;
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) {
+      return { allowed: false, reason: "apps-script-http-" + res.status };
+    }
+    return await res.json();
+  } catch (e) {
+    console.warn("LUX check error", e);
+    return { allowed: false, reason: "network-error" };
+  }
+}
+
+// v3 access cache – just remembers coneId + last state, NO GRACE
+// structure: { coneId, lastStatus, lastCheckMs, expiresAt }
+const LUX_ACCESS_CACHE_KEY_V3 = "lux_access_cache_v3";
+
 function lux_getAccessCache() {
   try {
-    const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V4, "");
+    const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V3, "");
     if (!raw) return null;
     const obj = JSON.parse(raw);
     if (!obj || !obj.coneId) return null;
@@ -139,130 +147,29 @@ function lux_getAccessCache() {
 }
 function lux_setAccessCache(data) {
   try {
-    GM_setValue(LUX_ACCESS_CACHE_KEY_V4, JSON.stringify(data || {}));
+    GM_setValue(LUX_ACCESS_CACHE_KEY_V3, JSON.stringify(data || {}));
   } catch (e) {
     console.warn("LUX access store error", e);
   }
 }
-function lux_clearAccessCache() {
-  try {
-    GM_setValue(LUX_ACCESS_CACHE_KEY_V4, "");
-  } catch {}
-}
-function lux_cacheIsValid(cache) {
-  if (!cache) return false;
-  if (cache.lastStatus !== "allowed") return false;
-  if (!cache.expiresAt) return true;
-  return Date.now() <= Number(cache.expiresAt);
-}
 
-// Read site ConeID if present (chat pages). If missing (dashboard), return empty.
-function lux_getSiteConeId() {
-  // 1) exact selector
-  try {
-    const el = document.querySelector(SITE_CONEID_SELECTOR_PRIMARY);
-    const t = el && el.textContent ? el.textContent.trim().toUpperCase() : "";
-    if (t && /^CONE[A-Z0-9]+$/.test(t)) return t;
-  } catch {}
-
-  // 2) common fallback: any navbar-text fw-bold containing CONE###
-  try {
-    const els = Array.from(document.querySelectorAll(".navbar-text.fw-bold"));
-    for (const e of els) {
-      const t = (e.textContent || "").trim().toUpperCase();
-      if (t && /^CONE[A-Z0-9]+$/.test(t)) return t;
-    }
-  } catch {}
-
-  // 3) last resort: scan for "CONE" token in small header areas
-  try {
-    const candidates = Array.from(document.querySelectorAll("div,span,strong"));
-    for (const e of candidates.slice(0, 200)) {
-      const t = (e.textContent || "").trim().toUpperCase();
-      if (t && /^CONE[A-Z0-9]+$/.test(t)) return t;
-    }
-  } catch {}
-
-  return "";
-}
-
-// Apps Script call via GM_xmlhttpRequest (handles redirects better than fetch in TM)
-async function lux_callAccessApi(coneId, siteConeId = "") {
-  const typed = String(coneId || "").trim().toUpperCase();
-  if (!typed) return { allowed: false, reason: "no-coneid" };
-
-  const url =
-    `${ACCESS_API_ENDPOINT}?coneid=${encodeURIComponent(typed)}` +
-    (siteConeId ? `&site_coneid=${encodeURIComponent(String(siteConeId).trim().toUpperCase())}` : "");
-
-  return new Promise((resolve) => {
-    GM_xmlhttpRequest({
-      method: "GET",
-      url,
-      timeout: 20000,
-      redirect: "follow",
-      onload: (res) => {
-        try {
-          const txt = String(res.responseText || "");
-          if (res.status < 200 || res.status >= 300) {
-            resolve({
-              allowed: false,
-              reason: "apps-script-http-" + res.status,
-              detail: txt.slice(0, 180),
-            });
-            return;
-          }
-          const json = JSON.parse(txt || "{}");
-          resolve(json);
-        } catch {
-          resolve({ allowed: false, reason: "apps-script-bad-json" });
-        }
-      },
-      onerror: () => resolve({ allowed: false, reason: "network-error" }),
-      ontimeout: () => resolve({ allowed: false, reason: "network-timeout" }),
-    });
-  });
-}
-
-// Verify flow:
-// - Do NOT prompt on dashboard until a thread message appears
-// - If site ConeID is present, typed ConeID must match it
-async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
+// STRICT gate: always re-check server, but never re-prompt ConeID unless missing
+async function lux_ensureAccess() {
   let cache = lux_getAccessCache();
-  const siteConeId = lux_getSiteConeId();
 
-  // If we have a cached coneId but site coneId is present and mismatched, force re-verify
-  if (cache && cache.coneId && siteConeId && cache.coneId !== siteConeId) {
-    lux_setAccessCache({
-      coneId: cache.coneId,
-      lastStatus: "denied",
-      lastCheckMs: Date.now(),
-      expiresAt: cache.expiresAt || null,
-      lastSiteConeId: siteConeId,
-    });
-    cache = null;
-  }
-
-  let coneId = cache && cache.coneId ? String(cache.coneId).trim().toUpperCase() : "";
-
-  if (!coneId && allowPrompt) {
+  // 1) Ensure we have a ConeID (prompt once, then reuse)
+  let coneId = cache && cache.coneId;
+  if (!coneId) {
     coneId = await lux_promptConeId();
-  }
-  if (!coneId) return { ok: false, reason: "no-coneid" };
-
-  // Enforce typed must match site coneid when site shows it
-  if (siteConeId && coneId !== siteConeId) {
-    lux_setAccessCache({
-      coneId,
-      lastStatus: "denied",
-      lastCheckMs: Date.now(),
-      expiresAt: null,
-      lastSiteConeId: siteConeId,
-    });
-    return { ok: false, reason: "coneid-mismatch-with-site" };
+    if (!coneId) {
+      lux_lockUI("no ConeID provided");
+      return false;
+    }
+    cache = { coneId };
   }
 
-  const result = await lux_callAccessApi(coneId, siteConeId);
+  // 2) Always ask the Apps Script on every page load
+  const result = await lux_checkOnlineAccess(coneId);
 
   if (!result || !result.allowed) {
     const reason = result && result.reason ? result.reason : "not-allowed";
@@ -270,68 +177,61 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
       coneId,
       lastStatus: "denied",
       lastCheckMs: Date.now(),
-      expiresAt: null,
-      lastSiteConeId: siteConeId || "",
+      expiresAt: null
     });
-    return { ok: false, reason };
+    lux_lockUI(reason);
+    return false;
   }
 
-  // Allowed
+  // 3) Allowed – record latest status/expiry for debugging only
   let expTs = null;
   if (result.expires) {
-    const ts = new Date(String(result.expires).trim() + "T23:59:59").getTime();
+    const ts = new Date(result.expires + "T23:59:59").getTime();
     if (!isNaN(ts)) expTs = ts;
   }
-
   lux_setAccessCache({
     coneId,
     lastStatus: "allowed",
     lastCheckMs: Date.now(),
-    expiresAt: expTs,
-    lastSiteConeId: siteConeId || "",
+    expiresAt: expTs
   });
 
-  return { ok: true, coneId, expiresAt: expTs };
+  return true;
 }
 
 /* ============================
    MAIN LUX SCRIPT
    ============================ */
 
-(function () {
-  "use strict";
+(async function () {
+  'use strict';
+
+  const accessOk = await lux_ensureAccess();
+  if (!accessOk) return;
 
   // ===== Config =====
-  const API_URL_DEFAULT = "https://openrouter.ai/api/v1/chat/completions";
-  const OPENROUTER_KEY_DEFAULT = "";
+  const API_URL_DEFAULT = 'https://openrouter.ai/api/v1/chat/completions'; // OpenRouter default
+  const OPENROUTER_KEY_DEFAULT = '';
 
-  // TEXT model default (unchanged behavior)
-  const MODEL_DEFAULT = "x-ai/grok-4-fast";
-  const PROVIDER_DEFAULT = "openrouter";
+  // MAIN DEFAULT: Grok 4 (fast)
+  const MODEL_DEFAULT = 'x-ai/grok-4-fast';
+  const PROVIDER_DEFAULT = 'openrouter';
 
-  // VISION model default (separate)
-  const MODEL_VISION_DEFAULT = "openai/gpt-4.1-mini";
-
-  // Use api.openrouter.ai for reliability
-  const OPENROUTER_API_URL = "https://api.openrouter.ai/api/v1/chat/completions";
-
-  const POLL_MS = 2500;
-  const HISTORY_MAX = 14;
-  const REQUEST_TIMEOUT_MS = 32000;
-
-  // Dashboard handling
-  const IS_DASHBOARD = /\/chatter\/dashboard\/?$/.test(location.pathname || "");
+  const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+  const POLL_MS = 3000;
+  const HISTORY_MAX = 14; // still used as a soft top, but we prune by tokens too
+  const REQUEST_TIMEOUT_MS = 35000;
 
   // ===== XOR ENCRYPTION FOR API KEY =====
-  const LUX_SECRET = "lux_starr_secret_salt_v1"; // change locally & keep private
-  const LUX_API_KEY_ENC = "lux_openrouter_key_enc";
-  const LUX_API_KEY_PLAIN_OLD = "lux_openrouter_key";
+  const LUX_SECRET = 'lux_starr_secret_salt_v1'; // change this locally & keep private
+  const LUX_API_KEY_ENC = 'lux_openrouter_key_enc';
+  const LUX_API_KEY_PLAIN_OLD = 'lux_openrouter_key';
 
   function lux_xorEncrypt(plainText, key = LUX_SECRET) {
-    if (!plainText) return "";
+    if (!plainText) return '';
     const p = String(plainText);
     const k = String(key);
-    let out = "";
+    let out = '';
     for (let i = 0; i < p.length; i++) {
       const c = p.charCodeAt(i) ^ k.charCodeAt(i % k.length);
       out += String.fromCharCode(c);
@@ -339,16 +239,16 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     return btoa(out);
   }
   function lux_xorDecrypt(cipherText, key = LUX_SECRET) {
-    if (!cipherText) return "";
-    let decoded = "";
+    if (!cipherText) return '';
+    let decoded = '';
     try {
       decoded = atob(cipherText);
     } catch (e) {
-      console.warn("LUX decrypt invalid base64", e);
-      return "";
+      console.warn('LUX decrypt: invalid base64', e);
+      return '';
     }
     const k = String(key);
-    let out = "";
+    let out = '';
     for (let i = 0; i < decoded.length; i++) {
       const c = decoded.charCodeAt(i) ^ k.charCodeAt(i % k.length);
       out += String.fromCharCode(c);
@@ -357,9 +257,9 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
   }
 
   function lux_getApiKey() {
-    const enc = GM_getValue(LUX_API_KEY_ENC, "");
+    const enc = GM_getValue(LUX_API_KEY_ENC, '');
     if (enc) return lux_xorDecrypt(enc);
-    const legacy = GM_getValue(LUX_API_KEY_PLAIN_OLD, "").trim();
+    const legacy = GM_getValue(LUX_API_KEY_PLAIN_OLD, '').trim();
     if (legacy) {
       const newEnc = lux_xorEncrypt(legacy);
       GM_setValue(LUX_API_KEY_ENC, newEnc);
@@ -367,77 +267,188 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     }
     return OPENROUTER_KEY_DEFAULT;
   }
+
   function lux_setApiKey(plainKey) {
-    const enc = lux_xorEncrypt(plainKey || "");
+    const enc = lux_xorEncrypt(plainKey || '');
     GM_setValue(LUX_API_KEY_ENC, enc);
   }
 
-  // ===== Presets =====
+  // ===== PII / CONTACT GUARD (HARD) =====
+  const PII = (() => {
+    const emailRe = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/ig;
+    const urlRe = /\b(?:https?:\/\/|www\.)\S+\b/ig;
+
+    // Handle patterns like @name, ig: name, snapchat name, telegram name, etc.
+    const handleRe = /(^|\s)(@[\w.]{3,32})\b/g;
+    const socialTagRe = /\b(?:ig|instagram|snap|snapchat|telegram|tg|discord|whatsapp|wa|twitter|x)\s*[:=]\s*[\w.@-]{3,}\b/ig;
+
+    // Phone-ish sequences: at least 7 digits total (so we don't nuke ages like 13)
+    function findPhoneCandidates(text) {
+      const s = String(text || '');
+      const re = /(?:\+?\d[\d\s().-]{5,}\d)/g;
+      const hits = [];
+      let m;
+      while ((m = re.exec(s)) !== null) {
+        const raw = m[0];
+        const digits = raw.replace(/\D/g, '');
+        if (digits.length >= 7 && digits.length <= 16) {
+          hits.push({ raw, digits });
+        }
+      }
+      return hits;
+    }
+
+    function hasPhone(text) {
+      const hits = findPhoneCandidates(text);
+      if (!hits.length) return false;
+
+      // If it looks like a year-only blob, ignore
+      for (const h of hits) {
+        if (h.digits.length === 4) continue;
+        // Most phone leaks are 7+ digits; we already filtered
+        return true;
+      }
+      return false;
+    }
+
+    function hasEmail(text) { return emailRe.test(String(text || '')); }
+    function hasUrl(text) { return urlRe.test(String(text || '')); }
+    function hasHandle(text) {
+      const s = String(text || '');
+      if (socialTagRe.test(s)) return true;
+      // @handle but not part of an email
+      if (handleRe.test(s) && !emailRe.test(s)) return true;
+      return false;
+    }
+
+    // Address-like detector (kept conservative, but catches obvious leaks)
+    function hasAddressLike(text) {
+      const s = String(text || '').toLowerCase();
+      if (/\b(?:my\s+address|come\s+to|pull\s+up\s+at|meet\s+me\s+at)\b/.test(s)) return true;
+      if (/\b\d{1,5}\s+[a-z0-9.\-]{2,}\s+(street|st|road|rd|avenue|ave|close|crescent|lane|ln|drive|dr|boulevard|blvd|way)\b/.test(s)) return true;
+      if (/\b(?:plot|block|apt|apartment|suite)\s*\d+\b/.test(s)) return true;
+      return false;
+    }
+
+    function containsPII(text) {
+      const s = String(text || '');
+      // reset lastIndex for global regexes
+      emailRe.lastIndex = 0; urlRe.lastIndex = 0; socialTagRe.lastIndex = 0; handleRe.lastIndex = 0;
+      return hasEmail(s) || hasUrl(s) || hasHandle(s) || hasPhone(s) || hasAddressLike(s);
+    }
+
+    function redactForLLM(text) {
+      // Goal: remove PII from customer text before it ever reaches the model, so it cannot echo it.
+      let t = String(text || '');
+
+      // Remove emails/urls
+      t = t.replace(emailRe, ' ');
+      t = t.replace(urlRe, ' ');
+
+      // Remove explicit social tags and @handles
+      t = t.replace(socialTagRe, ' ');
+      t = t.replace(handleRe, ' ');
+
+      // Remove phone-like sequences (7+ digits total)
+      const hits = findPhoneCandidates(t);
+      for (const h of hits) {
+        // Replace the exact raw snippet
+        t = t.split(h.raw).join(' ');
+      }
+
+      // Light address hints
+      t = t.replace(/\b\d{1,5}\s+[a-z0-9.\-]{2,}\s+(street|st|road|rd|avenue|ave|close|crescent|lane|ln|drive|dr|boulevard|blvd|way)\b/gi, ' ');
+      t = t.replace(/\s{2,}/g, ' ').trim();
+      return t;
+    }
+
+    function scrubHard(text) {
+      // Goal: remove any accidental PII from assistant output if rewrite still fails.
+      let t = String(text || '');
+
+      emailRe.lastIndex = 0; urlRe.lastIndex = 0; socialTagRe.lastIndex = 0; handleRe.lastIndex = 0;
+      t = t.replace(emailRe, ' ');
+      t = t.replace(urlRe, ' ');
+      t = t.replace(socialTagRe, ' ');
+      t = t.replace(handleRe, ' ');
+
+      const hits = findPhoneCandidates(t);
+      for (const h of hits) t = t.split(h.raw).join(' ');
+
+      t = t.replace(/\s{2,}/g, ' ').trim();
+      return t;
+    }
+
+    return { containsPII, redactForLLM, scrubHard };
+  })();
+
+  // 🔹 generic fallback preset if a model has no explicit tuning
   const MODEL_FALLBACK_PRESET = {
     temperature: 0.58,
     top_p: 0.92,
     repetition_penalty: 1.02,
-    max_tokens: 230,
+    max_tokens: 240,
     stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
-    seed: 11,
+    seed: 11
   };
 
+  // ===== Creative-leaning per-model presets (only the models we keep) =====
   const MODEL_PRESETS = {
-    "x-ai/grok-4-fast": {
+    'x-ai/grok-4-fast': {
       temperature: 0.72,
       top_p: 0.96,
       repetition_penalty: 1.02,
-      max_tokens: 230,
+      max_tokens: 240,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
-      seed: 13,
+      seed: 13
     },
-    "anthropic/claude-3.5-sonnet": {
+    'anthropic/claude-3.5-sonnet': {
       temperature: 0.62,
       top_p: 0.92,
       repetition_penalty: 1.02,
-      max_tokens: 230,
+      max_tokens: 240,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
-      seed: 21,
+      seed: 21
     },
-    "openai/gpt-4.1-mini": {
+    'openai/gpt-4.1-mini': {
       temperature: 0.55,
       top_p: 0.92,
       repetition_penalty: 1.03,
-      max_tokens: 230,
+      max_tokens: 240,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
-      seed: 7,
+      seed: 7
     },
-    "meta-llama/llama-3.3-8b-instruct:free": {
+    'meta-llama/llama-3.3-8b-instruct:free': {
       temperature: 0.65,
       top_p: 0.95,
       repetition_penalty: 1.04,
-      max_tokens: 210,
+      max_tokens: 220,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
-      seed: 17,
+      seed: 17
     },
-    "meta-llama/llama-3.3-70b-instruct:free": {
+    'meta-llama/llama-3.3-70b-instruct:free': {
       temperature: 0.66,
       top_p: 0.95,
       repetition_penalty: 1.03,
-      max_tokens: 220,
+      max_tokens: 230,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
-      seed: 19,
-    },
+      seed: 19
+    }
   };
 
   function getModelPreset(modelName) {
-    const name = (modelName || GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
+    const name = (modelName || GM_getValue('lux_model', MODEL_DEFAULT) || '').trim();
     return MODEL_PRESETS[name] || MODEL_FALLBACK_PRESET;
   }
 
-  // ===== Rate limiting =====
+  // ===== Rate limiting & token estimate =====
   const LUX_RATE_WINDOW_MS = 10_000;
   const LUX_RATE_MAX_REQ = 5;
-  const LUX_RATE_LOG_KEY = "lux_req_log_v1";
+  const LUX_RATE_LOG_KEY = 'lux_req_log_v1';
 
   function lux_getReqLog() {
     try {
-      return JSON.parse(GM_getValue(LUX_RATE_LOG_KEY, "[]")) || [];
+      return JSON.parse(GM_getValue(LUX_RATE_LOG_KEY, '[]')) || [];
     } catch {
       return [];
     }
@@ -447,27 +458,29 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
   }
   function lux_canSendRequest() {
     const now = Date.now();
-    let log = lux_getReqLog().filter((t) => now - t < LUX_RATE_WINDOW_MS);
+    let log = lux_getReqLog().filter(t => now - t < LUX_RATE_WINDOW_MS);
     if (log.length >= LUX_RATE_MAX_REQ) {
-      lux_showErrorOverlay("You are triggering LUX too quickly.\nGive it a few seconds and try again.");
+      lux_showErrorOverlay('You are triggering LUX too quickly.\nGive it a few seconds and try again.');
       return false;
     }
     log.push(now);
     lux_setReqLog(log);
     return true;
   }
+
   function lux_estimateTokens(str) {
-    return str ? Math.ceil(String(str).length / 4) : 0;
+    if (!str) return 0;
+    return Math.ceil(String(str).length / 4); // rough
   }
 
-  // ===== Creative booster =====
+  // ===== Adaptive creativity booster (persistent + daypart) =====
   const CREATIVE_BASE = 0.0;
   const CREATIVE_MAX = 0.25;
-  const LUX_CREATIVE_STATE_KEY = "lux_creative_state_v1";
+  const LUX_CREATIVE_STATE_KEY = 'lux_creative_state_v1';
 
   function lux_getCreativeState() {
     try {
-      return JSON.parse(GM_getValue(LUX_CREATIVE_STATE_KEY, "{}")) || {};
+      return JSON.parse(GM_getValue(LUX_CREATIVE_STATE_KEY, '{}')) || {};
     } catch {
       return {};
     }
@@ -476,39 +489,44 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     GM_setValue(LUX_CREATIVE_STATE_KEY, JSON.stringify(state || {}));
   }
 
-  function scoreCreativeIntent(text) {
-    const s = (text || "").toLowerCase();
+  function scoreCreativeIntent(text){
+    const s = (text||'').toLowerCase();
     let score = 0;
-    if (/\b(cute|adorable|pretty|gorgeous|fun|play|vibe|chemistry|smile|eyes|sweet)\b/.test(s)) score += 0.1;
+    if (/\b(cute|adorable|pretty|gorgeous|fun|play|vibe|chemistry|smile|eyes|sweet)\b/.test(s)) score += 0.10;
     if (/\b(pic|pics|picture|selfie|photo|gallery)\b/.test(s)) score += 0.08;
     if (/\b(how.*day|what.*up|tell me about|you like|you enjoy)\b/.test(s)) score += 0.06;
     if (/\b(fact|proof|specific|exact|details?|policy|rule|why|explain|clarify)\b/.test(s)) score -= 0.06;
-    if (/\b(meet|number|whatsapp|instagram|snap|telegram|address|call|text)\b/.test(s)) score -= 0.1;
+    if (/\b(meet|number|whatsapp|instagram|snap|telegram|address|call|text)\b/.test(s)) score -= 0.10;
     score += CREATIVE_BASE;
-    return Math.max(-0.1, Math.min(CREATIVE_MAX, score));
+    return Math.max(-0.10, Math.min(CREATIVE_MAX, score));
   }
+
   function lux_getDaypart(date = new Date()) {
     const hour = date.getHours();
-    if (hour < 5) return "late-night";
-    if (hour < 12) return "morning";
-    if (hour < 17) return "afternoon";
-    if (hour < 22) return "evening";
-    return "night";
+    if (hour < 5) return 'late-night';
+    if (hour < 12) return 'morning';
+    if (hour < 17) return 'afternoon';
+    if (hour < 22) return 'evening';
+    return 'night';
   }
-  function withCreativeBoost(base, msg) {
+
+  function withCreativeBoost(base, msg){
     const state = lux_getCreativeState();
     const history = state.history || [];
     const score = scoreCreativeIntent(msg);
     history.push(score);
     if (history.length > 5) history.shift();
-    const highCount = history.filter((s) => s >= 0.1).length;
+    const highCount = history.filter(s => s >= 0.10).length;
 
     let temperature = base.temperature ?? 0.7;
     let top_p = base.top_p ?? 0.9;
 
     const daypart = lux_getDaypart();
-    if (daypart === "late-night" || daypart === "night") temperature = Math.min(temperature + 0.05, 1.1);
-    else if (daypart === "morning") temperature = Math.max(temperature - 0.05, 0.45);
+    if (daypart === 'late-night' || daypart === 'night') {
+      temperature = Math.min(temperature + 0.05, 1.1);
+    } else if (daypart === 'morning') {
+      temperature = Math.max(temperature - 0.05, 0.45);
+    }
 
     if (highCount >= 3) {
       temperature = Math.min(temperature + 0.15, 1.2);
@@ -521,207 +539,226 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     }
 
     lux_setCreativeState({ history });
+
     return { ...base, temperature, top_p };
   }
 
-  // ===== OpenRouter payload shim =====
-  function sanitizePayloadForModel(payload, model) {
-    const m = (model || "").toLowerCase();
+  // ===== OpenRouter payload compatibility shim =====
+  function sanitizePayloadForModel(payload, model){
+    const m = (model||'').toLowerCase();
     const p = { ...payload };
-    if ("transforms" in p) delete p.transforms;
-    if ("logit_bias" in p && !p.logit_bias) delete p.logit_bias;
-    if (m.includes("llama-3.2-3b") && p.max_tokens > 260) p.max_tokens = 220;
+    if ('transforms' in p) delete p.transforms;
+    if ('logit_bias' in p && !p.logit_bias) delete p.logit_bias;
+    if (m.includes('llama-3.2-3b') && p.max_tokens > 260) p.max_tokens = 220;
     return p;
   }
 
   // ===== Selectors =====
-  const REPLY_INPUT_SELECTOR = "textarea#reply-textarea.form-control.border-start-0.border-end-0";
-  const PERSONA_NAME_SEL = "h5.fw-bold.mb-1";
-  const PERSONA_LOC_SEL = "h6.text-black-50";
-  const THREAD_SEL = "div#message-list.flex-grow-1.overflow-auto.p-4";
-  const CLIENT_MSG_SELECTOR = "div.d-flex.flex-row-reverse.my-2.message-box";
-  const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
-  const MEMBER_TIME_SEL = "span#memberTime.fw-bold";
-
-  // Age selector you provided
-  const PROFILE_AGE_SEL =
-    "#app > main > div.flex-grow-1.overflow-hidden > div.row.g-0.h-100 > div:nth-child(1) > div:nth-child(5) > table > tbody > tr:nth-child(2) > td:nth-child(2)";
+  const REPLY_INPUT_SELECTOR = 'textarea#reply-textarea.form-control.border-start-0.border-end-0';
+  const PERSONA_NAME_SEL = 'h5.fw-bold.mb-1';
+  const PERSONA_LOC_SEL = 'h6.text-black-50';
+  const THREAD_SEL = 'div#message-list.flex-grow-1.overflow-auto.p-4';
+  const CLIENT_MSG_SELECTOR = 'div.d-flex.flex-row-reverse.my-2.message-box';
+  const PERSONA_MSG_SELECTOR = 'div.d-flex.flex-row.my-2';
+  const MEMBER_TIME_SEL = 'span#memberTime.fw-bold';
 
   // ===== Utilities =====
-  function _qs(r, s) {
-    try {
-      return s ? r.querySelector(s) : null;
-    } catch {
-      return null;
-    }
-  }
-  function _qst(r, s) {
-    const el = _qs(r, s);
-    return el ? el.innerText.trim() : "";
-  }
-  function extractBracketName(s) {
-    if (!s) return "";
-    let m = s.match(/\(([^()]*)\)\s*$/);
-    if (!m) m = s.match(/\(([^)]+)\)/);
-    return m && m[1] ? m[1].trim() : "";
-  }
-  function cleanOutsideName(s) {
-    if (!s) return "";
-    return s.replace(/\s*\([^)]*\)\s*/g, "").trim();
-  }
-  function parseLeftProfile() {
-    const rawName = _qst(document, PERSONA_NAME_SEL);
+  function _qs(r,s){try{return s?r.querySelector(s):null;}catch{return null;}}
+  function _qst(r,s){const el=_qs(r,s);return el?el.innerText.trim():'';}
+  function extractBracketName(s){if(!s)return'';let m=s.match(/\(([^()]*)\)\s*$/);if(!m)m=s.match(/\(([^)]+)\)/);return(m&&m[1])?m[1].trim():'';}
+  function cleanOutsideName(s){if(!s)return'';return s.replace(/\s*\([^)]*\)\s*/g,'').trim();}
+  function parseLeftProfile(){
+    const rawName=_qst(document,PERSONA_NAME_SEL);
     return {
       rawName,
-      realName: extractBracketName(rawName) || "",
-      displayName: cleanOutsideName(rawName) || rawName,
-      location: _qst(document, PERSONA_LOC_SEL) || "nearby",
+      realName: extractBracketName(rawName)||'',
+      displayName: cleanOutsideName(rawName)||rawName,
+      location: _qst(document,PERSONA_LOC_SEL)||'nearby'
     };
   }
 
-  function lux_getProfileAge() {
-    try {
-      const el = document.querySelector(PROFILE_AGE_SEL);
-      const t = (el?.textContent || "").trim();
-      const n = parseInt(t, 10);
-      if (Number.isFinite(n) && n > 0 && n < 120) return n;
-    } catch {}
-    // fallback: first numeric bg-light-subtle td that looks like an age
-    try {
-      const tds = Array.from(document.querySelectorAll("td.bg-light-subtle"));
-      for (const td of tds) {
-        const n = parseInt((td.textContent || "").trim(), 10);
-        if (Number.isFinite(n) && n >= 18 && n <= 99) return n;
+  function getImageNotes(node){
+    if (!node) return [];
+    const imgs = [...node.querySelectorAll('img')];
+    const notes = [];
+    imgs.forEach(img => {
+      const alt = (img.getAttribute('alt') || '').trim();
+      const src = (img.getAttribute('src') || '').trim();
+      let name = '';
+      if (src) {
+        const clean = src.split('?')[0];
+        name = clean.split('/').pop() || '';
       }
-    } catch {}
-    return null;
+      const parts = [];
+      if (alt) parts.push(`alt text ${alt}`);
+      if (name) parts.push(`file ${name}`);
+      if (parts.length) notes.push(parts.join(', '));
+      else notes.push('image attached');
+    });
+    return notes;
   }
 
-  // Strip inline image notes from captured text
-  function stripInlineImageNotes(text) {
-    if (!text) return "";
+  function stripInlineImageNotes(text){
+    if (!text) return '';
     let t = String(text);
-    t = t.replace(/\bmessage\b\s*image\s+attached\.?/gi, "");
-    t = t.replace(/\bimage\s+attached\.?/gi, "");
-    t = t.replace(/\bimage\s+note\b[^.]*\.?/gi, "");
-    return t.replace(/\s{2,}/g, " ").trim();
+    t = t.replace(/\bmessage\b\s*image\s+attached\.?/gi, '');
+    t = t.replace(/\bimage\s+attached\.?/gi, '');
+    t = t.replace(/\bimage\s+note\b[^.]*\.?/gi, '');
+    return t.replace(/\s{2,}/g, ' ').trim();
   }
 
-  function extractMessageContent(node) {
-    const rawText = (node?.innerText || "").trim();
-    return stripInlineImageNotes(rawText);
+  /* ===========================
+     STAMP STRIPPING (UPDATED)
+     =========================== */
+
+  const TS_PATTERNS=[
+    /\[\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\]/gi,
+    /\(\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\)/gi,
+    /\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\b/gi,
+    /\b20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\b/g,
+    /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g,
+    /\b20\d{2}[01]\d[0-3]\d(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\b/g,
+    /\b\d{6,}\b/g,
+    /\breport\b\.?$/gi
+  ];
+  function stripTimestamps(s){
+    let t=(s||'').trim();
+    TS_PATTERNS.forEach(rx=>{ t=t.replace(rx,'').trim(); });
+    t=t.replace(/[-–—|•]+\s*$/g,'').replace(/^\s*[-–—|•]+\s*/g,'').trim();
+    return t;
   }
 
-  function notify(text) {
-    try {
-      GM_notification({ text, title: "LUX", timeout: 3500 });
-    } catch {
-      console.log("[LUX]", text);
-    }
-  }
-  function trimText(s, max) {
-    s = (s || "").toString();
-    return s.length > max ? s.slice(0, max) + "..." : s;
+  const LUX_IMG_START = 'LUX_IMG_NOTES_START';
+  const LUX_IMG_END   = 'LUX_IMG_NOTES_END';
+
+  function stripLuxImageMeta(s){
+    if (!s) return '';
+    const rx = new RegExp(`${LUX_IMG_START}[\\s\\S]*?${LUX_IMG_END}`, 'gi');
+    return String(s).replace(rx, '').replace(/\s{2,}/g,' ').trim();
   }
 
-  // ===== Limits =====
-  const MAX_CHARS = 800;
-  function clampToLimit(s, max = MAX_CHARS) {
-    let t = (s || "").trim();
-    if (t.length <= max) return t;
-    t = t.slice(0, max);
-    t = t.replace(/\s+\S*$/, "");
-    t = t.replace(/[^\w?\.]$/, "");
-    if (!/[.?]$/.test(t)) t = t.replace(/[,\-:]?$/, "") + ".";
+  function extractLuxImageMeta(s){
+    const str = String(s || '');
+    const rx = new RegExp(`${LUX_IMG_START}\\s*([\\s\\S]*?)\\s*${LUX_IMG_END}`, 'i');
+    const m = str.match(rx);
+    const notes = m && m[1] ? String(m[1]).trim() : '';
+    const clean = str.replace(new RegExp(`${LUX_IMG_START}[\\s\\S]*?${LUX_IMG_END}`, 'gi'), '');
+    return { text: clean.replace(/\s{2,}/g,' ').trim(), notes };
+  }
+
+  function stripTrailingStampLines(s){
+    if (!s) return '';
+    const isTimeOnly = l => /^(\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?)$/i.test(l);
+    const isDateOnly = l => /^(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2})$/i.test(l);
+
+    const isStampLine = (l) => {
+      if (!l) return false;
+      const line = String(l).trim();
+      if (!line) return false;
+      if (line.length > 80) return false;
+
+      if (/^(sent|delivered|seen|read|edited|today|yesterday)\b/i.test(line)) return true;
+      if (/^(message|image|photo|picture)\b.*\b(sent|delivered|seen|read)\b/i.test(line)) return true;
+      if (/\b(sent|delivered|seen|read)\b\s*(?:at\s*)?\d{1,2}:\d{2}/i.test(line)) return true;
+      if (isTimeOnly(line) || isDateOnly(line)) return true;
+
+      return false;
+    };
+
+    let lines = String(s).split(/\r?\n/).map(x => x.trim());
+    while (lines.length && !lines[lines.length-1]) lines.pop();
+    while (lines.length && isStampLine(lines[lines.length-1])) lines.pop();
+
+    return lines.join(' ').replace(/\s{2,}/g,' ').trim();
+  }
+
+  function stripStampsAll(s){
+    let t = String(s || '');
+    t = stripLuxImageMeta(t);
+    t = stripTimestamps(t);
+    t = stripTrailingStampLines(t);
     return t.trim();
   }
 
-  // ===== Day/time context =====
-  function buildTimeContext() {
-    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const dayShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const el = document.querySelector(MEMBER_TIME_SEL);
-    const raw = el?.textContent?.trim() || "";
+  function stripStampsKeepMeta(s){
+    let t = String(s || '');
+    t = stripTimestamps(t);
+    t = stripTrailingStampLines(t);
+    return t.trim();
+  }
 
+  function extractMessageContent(node){
+    const rawText = (node?.innerText || '').trim();
+    const text = stripStampsAll(stripInlineImageNotes(rawText));
+    const imageNotes = getImageNotes(node);
+    if (!imageNotes.length) return text;
+
+    const meta = `${LUX_IMG_START} ${imageNotes.join(' | ')} ${LUX_IMG_END}`;
+    return text ? `${text}\n${meta}` : meta;
+  }
+
+  function personaCardLine(card){
+    if(!card) return '';
+    const bits=[]; if(card.realName) bits.push(`RealName: ${card.realName}`);
+    if(card.displayName)bits.push(`Username: ${card.displayName}`);
+    if(card.location) bits.push(`Location: ${card.location}`);
+    return bits.length ? ` Persona card, ${bits.join(', ')}.` : '';
+  }
+
+  function notify(text){try{GM_notification({text,title:'LUX',timeout:3500});}catch{console.log('[LUX]',text);} }
+  function trimText(s,max){ s = (s||'').toString(); return s.length>max ? s.slice(0,max)+'...' : s; }
+
+  // ===== Limits: hard cap =====
+  const MAX_CHARS = 800;
+  function clampToLimit(s, max = MAX_CHARS) {
+    let t = (s || '').trim();
+    if (t.length <= max) return t;
+    t = t.slice(0, max);
+    t = t.replace(/\s+\S*$/, '');
+    t = t.replace(/[^\w?\.]$/, '');
+    if (!/[.?]$/.test(t)) t = t.replace(/[,\-:]?$/, '') + '.';
+    return t.trim();
+  }
+
+  // ===== Raw page day/time & daypart (with REAL day name) =====
+  function buildTimeContext() {
+    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const dayShort = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const el = document.querySelector(MEMBER_TIME_SEL);
+    const raw = el?.textContent?.trim() || '';
     const parseHour24 = (txt) => {
       const m = txt.match(/(\d{1,2})[:.](\d{2})(?:\s*([AP]\.?M\.?))?/i);
       if (!m) return NaN;
-      let h = parseInt(m[1], 10);
-      const ap = (m[3] || "").replace(/\./g, "").toUpperCase();
+      let h = parseInt(m[1],10);
+      const ap = (m[3]||'').replace(/\./g,'').toUpperCase();
       if (!ap) return Math.min(23, Math.max(0, h));
-      if (ap === "AM") {
-        if (h === 12) h = 0;
-      } else if (ap === "PM") {
-        if (h !== 12) h += 12;
-      }
+      if (ap === 'AM') { if (h === 12) h = 0; }
+      else if (ap === 'PM') { if (h !== 12) h += 12; }
       return h;
     };
-
     const parseDayIndex = (txt) => {
-      const s = (txt || "").toLowerCase();
-      const map = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, fri: 5, sat: 6 };
+      const s = (txt||'').toLowerCase();
+      const map = {sun:0, mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, fri:5, sat:6};
       const long = s.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
-      if (long) return ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(long[0]);
+      if (long) return ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(long[0]);
       const short = s.match(/\b(sun|mon|tue|tues|wed|thu|thur|fri|sat)\b/);
       if (short) return map[short[0]];
       return NaN;
     };
-
     const now = new Date();
     const hour24 = Number.isFinite(parseHour24(raw)) ? parseHour24(raw) : now.getHours();
     const dayIndex = Number.isFinite(parseDayIndex(raw)) ? parseDayIndex(raw) : now.getDay();
-    const dayName = dayNames[dayIndex] || now.toLocaleDateString(undefined, { weekday: "long" });
-    const daypart = (h) => (h >= 5 && h < 12 ? "morning" : h < 17 ? "afternoon" : h < 22 ? "evening" : "night");
-    const fallbackTime = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const dayName = dayNames[dayIndex] || now.toLocaleDateString(undefined,{weekday:'long'});
+    const daypart = (h)=> (h>=5 && h<12)?'morning':(h<17)?'afternoon':(h<22)?'evening':'night';
+    const fallbackTime = now.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
     const fallbackDayShort = dayShort[now.getDay()];
     const rawDayTime = raw && /\d/.test(raw) ? raw : `${fallbackDayShort} ${fallbackTime}`;
     return { hour24, dayIndex, dayName, daypart: daypart(hour24), rawDayTime, raw };
   }
 
-  // ===== Occupation (age-aware) =====
-  const LUX_OCC_KEY = "lux_occupation_v1";
-  function lux_randFrom(arr, seedStr) {
-    const s = String(seedStr || "lux");
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    const idx = arr.length ? h % arr.length : 0;
-    return arr[idx] || "";
-  }
-  function lux_pickOccupation(age, seedStr) {
-    const a = Number(age || 0);
-    const bands = {
-      young: ["social media assistant", "junior designer", "barista", "customer support rep", "makeup artist"],
-      adult: ["project coordinator", "office administrator", "HR assistant", "marketing specialist", "graphic designer"],
-      mid: ["operations manager", "senior administrator", "account manager", "event planner", "small business owner"],
-      older: ["consultant", "retired teacher", "community coordinator", "part time bookkeeper", "mentor"],
-      senior: ["retired", "retired teacher", "retired nurse", "part time consultant", "volunteer coordinator"],
-    };
-
-    if (a && a >= 67) return lux_randFrom(bands.senior, seedStr);
-    if (a && a >= 56) return lux_randFrom(bands.older, seedStr);
-    if (a && a >= 41) return lux_randFrom(bands.mid, seedStr);
-    if (a && a >= 26) return lux_randFrom(bands.adult, seedStr);
-    return lux_randFrom(bands.young, seedStr);
-  }
-  function lux_getOrSetOccupation() {
-    const age = lux_getProfileAge();
-    const cache = lux_getAccessCache();
-    const seed = (cache?.coneId || "") + "|" + (parseLeftProfile().displayName || "Lux");
-    let occ = GM_getValue(LUX_OCC_KEY, "");
-    // If missing or obviously wrong for older ages, re-pick
-    if (!occ) {
-      occ = lux_pickOccupation(age, seed);
-      GM_setValue(LUX_OCC_KEY, occ);
-    } else if (age && age >= 67 && /(junior|barista|assistant|graphic designer)$/i.test(occ)) {
-      occ = lux_pickOccupation(age, seed);
-      GM_setValue(LUX_OCC_KEY, occ);
-    }
-    return { occupation: occ || "office administrator", age: age || null };
-  }
-
-  // ===== Styles =====
-  const css = document.createElement("style");
-  css.textContent = `
+  // ===== Base Styles =====
+  const css=document.createElement('style');
+  css.textContent=`
 #lux-btn{position:fixed;bottom:20px;right:20px;z-index:99999;background:#0b3d91;color:#fff;border:0;padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(11,61,145,.3)}
 #lux-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:820px;max-width:98vw;max-height:84vh;overflow:auto;background:#1f1f1f;color:#eee;border:2px solid #0b3d91;border-radius:14px;padding:14px;z-index:100000;display:none;font-family:system-ui,sans-serif}
 #lux-responses{display:flex;flex-direction:column;gap:8px}
@@ -737,16 +774,10 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
   `;
   document.head.appendChild(css);
 
-  // ===== UI Root (created always, but hidden until verified or cached-allowed) =====
-  const btn = document.createElement("button");
-  btn.id = "lux-btn";
-  btn.textContent = "LUX";
-  btn.style.display = "none"; // start hidden
-  document.body.appendChild(btn);
-
-  const pop = document.createElement("div");
-  pop.id = "lux-popup";
-  pop.innerHTML = `
+  // ===== UI Root =====
+  const btn=document.createElement('button');btn.id='lux-btn';btn.textContent='LUX';document.body.appendChild(btn);
+  const pop=document.createElement('div');pop.id='lux-popup';
+  pop.innerHTML=`
   <div id="lux-topbar" style="margin-bottom:8px"></div>
   <textarea id="lux-customer" placeholder="Latest customer message" style="width:100%;min-height:96px;border:1px solid #3a4155;background:#2a2a2a;color:#fff;border-radius:8px;padding:8px;margin:8px 0"></textarea>
   <div id="lux-responses"></div>
@@ -761,8 +792,7 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
   <div id="lux-settings-panel">
     <div><strong>Backend URL</strong></div><input type="text" id="lux-api-url">
     <div><strong>OpenRouter API Key</strong></div><input type="text" id="lux-api-key">
-    <div><strong>Model (Text Replies)</strong></div><input type="text" id="lux-model">
-    <div><strong>Model (Vision For Images)</strong></div><input type="text" id="lux-model-vision">
+    <div><strong>Model</strong></div><input type="text" id="lux-model">
     <div><strong>Provider</strong></div><input type="text" id="lux-provider">
     <div><strong>Custom Persona (optional)</strong></div><textarea id="lux-persona"></textarea>
     <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:4px">
@@ -773,110 +803,113 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
   </div>`;
   document.body.appendChild(pop);
 
-  const ui = {
-    popup: pop,
-    topbar: pop.querySelector("#lux-topbar"),
-    customer: pop.querySelector("#lux-customer"),
-    list: pop.querySelector("#lux-responses"),
-    send: pop.querySelector("#lux-send"),
-    regen: pop.querySelector("#lux-regen"),
-    models: pop.querySelector("#lux-models"),
-    modelsPanel: pop.querySelector("#lux-models-panel"),
-    settings: pop.querySelector("#lux-settings"),
-    close: pop.querySelector("#lux-close"),
-    panel: pop.querySelector("#lux-settings-panel"),
-    apiUrl: pop.querySelector("#lux-api-url"),
-    apiKey: pop.querySelector("#lux-api-key"),
-    model: pop.querySelector("#lux-model"),
-    modelVision: pop.querySelector("#lux-model-vision"),
-    provider: pop.querySelector("#lux-provider"),
-    persona: pop.querySelector("#lux-persona"),
-    excuseViaModel: pop.querySelector("#lux-excuse-via-model"),
-    filterEnabled: pop.querySelector("#lux-filter-enabled"),
-    save: pop.querySelector("#lux-save"),
+  const ui={
+    popup:pop,
+    topbar:pop.querySelector('#lux-topbar'),
+    customer:pop.querySelector('#lux-customer'),
+    list:pop.querySelector('#lux-responses'),
+    send:pop.querySelector('#lux-send'),
+    regen:pop.querySelector('#lux-regen'),
+    models:pop.querySelector('#lux-models'),
+    modelsPanel:pop.querySelector('#lux-models-panel'),
+    settings:pop.querySelector('#lux-settings'),
+    close:pop.querySelector('#lux-close'),
+    panel:pop.querySelector('#lux-settings-panel'),
+    apiUrl:pop.querySelector('#lux-api-url'),
+    apiKey:pop.querySelector('#lux-api-key'),
+    model:pop.querySelector('#lux-model'),
+    provider:pop.querySelector('#lux-provider'),
+    persona:pop.querySelector('#lux-persona'),
+    excuseViaModel:pop.querySelector('#lux-excuse-via-model'),
+    filterEnabled:pop.querySelector('#lux-filter-enabled'),
+    save:pop.querySelector('#lux-save'),
   };
 
-  // Load settings
-  ui.apiUrl.value = GM_getValue("lux_api_url", API_URL_DEFAULT);
+  ui.apiUrl.value = GM_getValue('lux_api_url', API_URL_DEFAULT);
   ui.apiKey.value = lux_getApiKey();
-  ui.model.value = GM_getValue("lux_model", MODEL_DEFAULT);
-  ui.modelVision.value = GM_getValue("lux_model_vision", MODEL_VISION_DEFAULT);
-  ui.provider.value = GM_getValue("lux_provider", PROVIDER_DEFAULT);
-  ui.persona.value = GM_getValue("lux_persona", "");
-  ui.excuseViaModel.checked = GM_getValue("lux_excuse_via_model", 1) === 1;
-  ui.filterEnabled.checked = !!GM_getValue("lux_filter_enabled", 0);
+  ui.model.value = GM_getValue('lux_model', MODEL_DEFAULT);
+  ui.provider.value = GM_getValue('lux_provider', PROVIDER_DEFAULT);
+  ui.persona.value = GM_getValue('lux_persona','');
+  ui.excuseViaModel.checked = GM_getValue('lux_excuse_via_model',1)===1;
+  ui.filterEnabled.checked = !!GM_getValue('lux_filter_enabled',0);
 
-  // ===== Model picker (TEXT + VISION) =====
+  // ===== Models picker =====
   const modelChoices = [
-    "x-ai/grok-4-fast",
-    "anthropic/claude-3.5-sonnet",
-    "openai/gpt-4.1-mini",
-    "meta-llama/llama-3.3-8b-instruct:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
+    'x-ai/grok-4-fast',
+    'anthropic/claude-3.5-sonnet',
+    'openai/gpt-4.1-mini',
+    'meta-llama/llama-3.3-8b-instruct:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
   ];
-
-  // Added: image models under text models (used automatically when last client message has an image)
-  const visionModelChoices = [
-    "openai/gpt-4.1-mini",
-    "openai/gpt-4o-mini",
-    "openai/gpt-4o",
-    "google/gemini-2.0-flash",
-    "google/gemini-2.0-pro",
-    "anthropic/claude-3.5-sonnet",
-  ];
-
   let LUXSettingsDirty = false;
 
-  // ===== Timestamp stripper =====
-  const TS_PATTERNS = [
-    /\[\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\]/gi,
-    /\(\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\)/gi,
-    /\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\b/gi,
-    /\b20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2}\b/g,
-    /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/g,
-    /\b20\d{2}[01]\d[0-3]\d(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\b/g,
-    /\b\d{6,}\b/g,
-    /\breport\b\.?$/gi,
-  ];
-  function stripTimestamps(s) {
-    let t = (s || "").trim();
-    TS_PATTERNS.forEach((rx) => {
-      t = t.replace(rx, "").trim();
+  function renderModelButtons(){
+    const cur = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim();
+    const p = ui.modelsPanel;
+    p.innerHTML = '';
+    const head = document.createElement('div');
+    head.style.marginBottom = '6px';
+    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || 'default'}</span>`;
+    p.appendChild(head);
+
+    modelChoices.forEach(m => {
+      const b = document.createElement('button');
+      b.className = 'lux-model';
+      b.textContent = m;
+      b.addEventListener('click', () => {
+        ui.model.value = m;
+        GM_setValue('lux_model', m);
+        const providerField = ui.provider;
+        if (providerField) {
+          if (/gpt-|o3-|o1-/.test(m)) providerField.value = 'openai';
+          else providerField.value = 'openrouter';
+          GM_setValue('lux_provider', providerField.value.trim());
+        }
+        LUXSettingsDirty = true;
+        notify('Model set to ' + m);
+        LUXPatch.UIChips.refresh({ modelLabel: m });
+        renderModelButtons();
+      });
+      p.appendChild(b);
     });
-    t = t.replace(/[-–—|•]+\s*$/g, "").replace(/^\s*[-–—|•]+\s*/g, "").trim();
-    return t;
   }
+  function toggleModelsPanel(){
+    const p = ui.modelsPanel;
+    const open = getComputedStyle(p).display !== 'none' && getComputedStyle(p).visibility !== 'hidden';
+    if (open){ p.style.display = 'none'; p.style.visibility = 'hidden'; }
+    else { renderModelButtons(); p.style.display = 'block'; p.style.visibility = 'visible'; }
+  }
+  ui.models.addEventListener('click', toggleModelsPanel);
 
   // ===== LUXPatch namespaces =====
-  const LUXPatch = typeof window.LUXPatch !== "undefined" ? window.LUXPatch : (window.LUXPatch = {});
+  const LUXPatch = (typeof window.LUXPatch!=='undefined' ? window.LUXPatch : (window.LUXPatch = {}));
 
   /* ===========================
      PATCH: UI Topbar Chips
      =========================== */
-  LUXPatch.UIChips = (() => {
-    const ids = { topbar: "lux-topbar-chips", chipModel: "lux-chip-model", chipDaypart: "lux-chip-daypart" };
-    function ensureStyles() {
-      if (document.getElementById("luxpatch-chips-style")) return;
-      const css2 = document.createElement("style");
-      css2.id = "luxpatch-chips-style";
-      css2.textContent = `
+  LUXPatch.UIChips = (()=>{
+
+    const ids = { topbar:'lux-topbar', chipModel:'lux-chip-model', chipDaypart:'lux-chip-daypart' };
+    function ensureStyles(){
+      if (document.getElementById('luxpatch-chips-style')) return;
+      const css = document.createElement('style');
+      css.id = 'luxpatch-chips-style';
+      css.textContent = `
         .luxpatch-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
         .luxpatch-chip{background:#2b3545;border:1px solid #3c4c66;color:#cfe0ff;border-radius:999px;padding:4px 10px;font-size:12px}
         .luxpatch-brand{font-weight:900;letter-spacing:.4px;color:#bcd7ff}
       `;
-      document.head.appendChild(css2);
+      document.head.appendChild(css);
     }
-    function timeChipLabel() {
+    function timeChipLabel(){
       const tc = buildTimeContext();
-      return `${tc.rawDayTime} , ${tc.daypart} , ${tc.dayName}`;
+      return `${tc.rawDayTime} • ${tc.daypart} • ${tc.dayName}`;
     }
-    function mountTopbar(container) {
+    function mountTopbar(container){
       ensureStyles();
       if (!container) return null;
-      if (document.getElementById(ids.topbar)) return document.getElementById(ids.topbar);
-      const top = document.createElement("div");
-      top.id = ids.topbar;
-      top.className = "luxpatch-topbar";
+      const top = document.createElement('div');
+      top.id = ids.topbar; top.className = 'luxpatch-topbar';
       top.innerHTML = `
         <div class="luxpatch-brand">LUX</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -884,106 +917,27 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
           <span class="luxpatch-chip" id="${ids.chipDaypart}">—</span>
         </div>`;
       container.appendChild(top);
-      refresh({ modelLabel: "default" });
+      refresh({modelLabel:'default'});
       return top;
     }
-    function refresh({ modelLabel }) {
-      const m = document.getElementById(ids.chipModel);
-      const d = document.getElementById(ids.chipDaypart);
-      if (m && modelLabel) m.textContent = `model: ${modelLabel}`;
-      if (d) d.textContent = timeChipLabel();
+    function refresh({modelLabel}){
+      const m=document.getElementById(ids.chipModel);
+      const d=document.getElementById(ids.chipDaypart);
+      if(m && modelLabel) m.textContent=`model: ${modelLabel}`;
+      if(d) d.textContent=timeChipLabel();
     }
-    return { mountTopbar, refresh };
+    function unmount(){const n=document.getElementById(ids.topbar); if(n) n.remove();}
+    return { mountTopbar, refresh, unmount, ids };
   })();
 
   LUXPatch.UIChips.mountTopbar(ui.topbar);
-
-  function renderModelButtons() {
-    const curText = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
-    const curVision = (GM_getValue("lux_model_vision", MODEL_VISION_DEFAULT) || "").trim();
-
-    const p = ui.modelsPanel;
-    p.innerHTML = "";
-
-    // TEXT section
-    const head = document.createElement("div");
-    head.style.marginBottom = "6px";
-    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">text: ${curText || "default"}</span>`;
-    p.appendChild(head);
-
-    modelChoices.forEach((m) => {
-      const b = document.createElement("button");
-      b.className = "lux-model";
-      b.textContent = m;
-      b.addEventListener("click", () => {
-        ui.model.value = m;
-        GM_setValue("lux_model", m);
-
-        const providerField = ui.provider;
-        if (providerField) {
-          if (/gpt-|o3-|o1-/.test(m)) providerField.value = "openai";
-          else providerField.value = "openrouter";
-          GM_setValue("lux_provider", providerField.value.trim());
-        }
-
-        LUXSettingsDirty = true;
-        notify("Text model set to " + m);
-        LUXPatch.UIChips.refresh({ modelLabel: m });
-        renderModelButtons();
-      });
-      p.appendChild(b);
-    });
-
-    // Divider
-    const hr = document.createElement("div");
-    hr.style.cssText = "margin:10px 0;border-top:1px dashed #3c4c66;";
-    p.appendChild(hr);
-
-    // VISION section (added)
-    const head2 = document.createElement("div");
-    head2.style.marginBottom = "6px";
-    head2.innerHTML = `<strong>Pick a vision model</strong> <span class="lux-tag">vision: ${curVision || MODEL_VISION_DEFAULT}</span>`;
-    p.appendChild(head2);
-
-    visionModelChoices.forEach((m) => {
-      const b = document.createElement("button");
-      b.className = "lux-model";
-      b.textContent = m;
-      b.addEventListener("click", () => {
-        ui.modelVision.value = m;
-        GM_setValue("lux_model_vision", m);
-        LUXSettingsDirty = true;
-        notify("Vision model set to " + m);
-        renderModelButtons();
-      });
-      p.appendChild(b);
-    });
-
-    // Note (kept tiny)
-    const note = document.createElement("div");
-    note.style.cssText = "margin-top:6px;font-size:12px;color:#9fb7dd;";
-    note.textContent = "Vision model is used automatically when the last client message contains an image.";
-    p.appendChild(note);
-  }
-
-  function toggleModelsPanel() {
-    const p = ui.modelsPanel;
-    const open = getComputedStyle(p).display !== "none" && getComputedStyle(p).visibility !== "hidden";
-    if (open) {
-      p.style.display = "none";
-      p.style.visibility = "hidden";
-    } else {
-      renderModelButtons();
-      p.style.display = "block";
-      p.style.visibility = "visible";
-    }
-  }
-  ui.models.addEventListener("click", toggleModelsPanel);
+  LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
 
   /* ===========================
      PATCH: No-Repeat Guard
      =========================== */
-  LUXPatch.NoRepeat = (() => {
+  LUXPatch.NoRepeat = (()=>{
+
     const bannedPhrases = [
       "early start",
       "quiet evening",
@@ -1002,6 +956,7 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
       "let's keep the chat online",
       "let's keep building the heat",
       "let's keep building the connection",
+      "let's keep building the heat or connection",
       "keep building the heat",
       "keep building the connection",
       "build the heat",
@@ -1016,12 +971,12 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
       "im not ready for that",
       "i'm not ready for that",
       "i need to focus on building a connection here",
-      "i'd like to focus on getting to know each other first",
+      "i'd like to focus on getting to know each other first"
     ];
     const bannedRegexes = [
       /let['’]?s\s+keep\s+building\s+(?:the\s+)?(?:heat|connection)(?:\s+or\s+(?:the\s+)?(?:heat|connection))?/gi,
       /keep\s+building\s+(?:the\s+)?(?:heat|connection)/gi,
-      /\bbuild(?:ing)?\s+(?:the\s+|our\s+)?(?:heat|connection)\b/gi,
+      /\bbuild(?:ing)?\s+(?:the\s+|our\s+)?(?:heat|connection)\b/gi
     ];
 
     const substitutionPool = [
@@ -1029,7 +984,7 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
       "I like keeping things simple and cozy between us here.",
       "I like the way this feels here, just us and the conversation.",
       "I'm enjoying this space with you, right here.",
-      "I'm all yours on this screen for now.",
+      "I'm all yours on this screen for now."
     ];
     function randomSub() {
       return substitutionPool[Math.floor(Math.random() * Math.random() * substitutionPool.length)] || substitutionPool[0];
@@ -1037,62 +992,62 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     function substitute(text) {
       if (!text) return text;
       let out = String(text);
-      bannedPhrases.forEach((phrase) => {
+      bannedPhrases.forEach(phrase => {
         if (!phrase) return;
-        const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-        if (regex.test(out)) out = out.replace(regex, randomSub());
+        const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        if (regex.test(out)) {
+          const repl = randomSub();
+          out = out.replace(regex, repl);
+        }
       });
-      bannedRegexes.forEach((regex) => {
-        if (regex.test(out)) out = out.replace(regex, randomSub());
+      bannedRegexes.forEach(regex => {
+        if (regex.test(out)) {
+          const repl = randomSub();
+          out = out.replace(regex, repl);
+        }
       });
       return out;
     }
     function dedupePhrases(text) {
       if (!text) return text;
       let out = String(text);
-      out = out.replace(/\b(\w+)(\s+\1\b)+/gi, "$1");
-      out = out.replace(/\b(\w+\s+\w+)(\s+\1\b)+/gi, "$1");
-      out = out.replace(/\b(\w+\s+\w+\s+\w+)(\s+\1\b)+/gi, "$1");
-      out = out.replace(/\b(\w+(?:\s+\w+){0,2})\b([,;:])\s+\1\b/gi, "$1");
+      out = out.replace(/\b(\w+)(\s+\1\b)+/gi, '$1');
+      out = out.replace(/\b(\w+\s+\w+)(\s+\1\b)+/gi, '$1');
+      out = out.replace(/\b(\w+\s+\w+\s+\w+)(\s+\1\b)+/gi, '$1');
+      out = out.replace(/\b(\w+(?:\s+\w+){0,2})\b([,;:])\s+\1\b/gi, '$1');
       return out;
     }
-    function scrub(text) {
-      return dedupePhrases(substitute(text));
+    function scrub(text){
+      const substituted = substitute(text);
+      return dedupePhrases(substituted);
     }
-    return { scrub };
+    return { scrub, substitute };
   })();
 
   /* =========================================
      Safety & Refusals
      ========================================= */
   const Safety = (() => {
-    const CONTACT_REQUEST_RE =
-      /\b(?:what(?:'| i)?s\s+(?:your\s+)?(?:number|no\.?|email)|give\s+me\s+(?:your\s+)?(?:number|email)|add\s+me\s+on\s+(?:whatsapp|ig|instagram|snap(?:chat)?|telegram|discord)|dm\s+me\s+on\s+(?:ig|instagram|x|twitter)|hit\s+me\s+up\s+on\s+(?:whatsapp|ig|instagram|snap|telegram|discord)|call\s+me|text\s+me|send\s+me\s+(?:your\s+)?contact|share\s+(?:your\s+)?(?:number|email)|give\s+me\s+your\s+contact|reach\s+me\s+at)\b/i;
-    const MEET_EXPLICIT_RE =
-      /\b(?:let['’]?s\s+(?:meet|hang(?:\s*out)?|link\s*up|grab\s+(?:a\s+)?(?:drink|coffee)|go\s+for\s+(?:drinks?|coffee))|see\s+you\s+(?:tonight|tomorrow|later)|(?:bar|club|restaurant|dinner|lunch|brunch|date|coffee|café|cafe|drinks?|hookup))\b/i;
-    const MEET_INDIRECT_RE =
-      /\b(?:are\s+you\s+(?:available|free|around)\b|you\s+(?:free|available)\b|when\s+(?:are\s+you\s+)?free\b|what\s+time\s+works\b|would\s+you\s+like\s+to\s+meet\b|can\s+we\s+(?:meet|link|hang)\b|can\s+i\s+see\s+you\b|see\s+you\s+(?:later|tonight)\b|pull\s+up\b|come\s+through\b)\b/i;
+    const CONTACT_REQUEST_RE = /\b(?:what(?:'| i)?s\s+(?:your\s+)?(?:number|no\.?|email)|give\s+me\s+(?:your\s+)?(?:number|email)|add\s+me\s+on\s+(?:whatsapp|ig|instagram|snap(?:chat)?|telegram|discord)|dm\s+me\s+on\s+(?:ig|instagram|x|twitter)|hit\s+me\s+up\s+on\s+(?:whatsapp|ig|instagram|snap|telegram|discord)|call\s+me|text\s+me|send\s+me\s+(?:your\s+)?contact|share\s+(?:your\s+)?(?:number|email)|give\s+me\s+your\s+contact|reach\s+me\s+at)\b/i;
+    const MEET_EXPLICIT_RE = /\b(?:let['’]?s\s+(?:meet|hang(?:\s*out)?|link\s*up|grab\s+(?:a\s+)?(?:drink|coffee)|go\s+for\s+(?:drinks?|coffee))|see\s+you\s+(?:tonight|tomorrow|later)|(?:bar|club|restaurant|dinner|lunch|brunch|date|coffee|café|cafe|drinks?|hookup))\b/i;
+    const MEET_INDIRECT_RE = /\b(?:are\s+you\s+(?:available|free|around)\b|you\s+(?:free|available)\b|when\s+(?:are\s+you\s+)?free\b|what\s+time\s+works\b|would\s+you\s+like\s+to\s+meet\b|can\s+we\s+(?:meet|link|hang)\b|can\s+i\s+see\s+you\b|see\s+you\s+(?:later|tonight)\b|pull\s+up\b|come\s+through\b)\b/i;
     const ADDRESS_RE = /\b(address|house|apartment|home|street|avenue|road|rd\.?|st\.?)\b/i;
     const NAME_RE = /\b(what(?:'| i)?s\s+your\s+name|ur\s*name|name\s*please|name\s*pls|who\s+are\s+you)\b/i;
-    const LOCATION_RE =
-      /\b(where\s+do\s+you\s+(?:live|stay)|where\s+are\s+you|what\s+city|your\s+city|your\s+location|where\s+are\s+you\s+based|where\s+are\s+u\s+at|what\s+part\s+are\s+you\s+in|where\s+do\s+you\s+reside|what\s+part\s+of\s+town|where\s+you\s+located|where\s+are\s+you\s+located)\b/i;
-    const WORK_RE = /\b(what\s+do\s+you\s+do|your\s+job|your\s+work|occupation|career|what\s+line\s+of\s+work|what\s+do\s+you\s+do\s+for\s+work)\b/i;
+    const LOCATION_RE = /\b(where\s+do\s+you\s+(?:live|stay)|where\s+are\s+you|what\s+city|your\s+city|your\s+location|where\s+are\s+you\s+based|where\s+are\s+u\s+at|what\s+part\s+are\s+you\s+in|where\s+do\s+you\s+reside|what\s+part\s+of\s+town|where\s+you\s+located|where\s+are\s+you\s+located)\b/i;
 
-    const USER_MENTIONS_FAMILY_RE =
-      /\b(family|my\s+(?:sister|brother|mom|mother|dad|father|parents?|cousin|aunt|uncle|kids?|child|niece|nephew)|babysit(?:ting)?|family\s+issues?)\b/i;
+    const USER_MENTIONS_FAMILY_RE = /\b(family|my\s+(?:sister|brother|mom|mother|dad|father|parents?|cousin|aunt|uncle|kids?|child|niece|nephew)|babysit(?:ting)?|family\s+issues?)\b/i;
     const FAMILY_WORD_RE = /\b(family|mom|mother|dad|father|parents?|sister|brother|cousin|aunt|uncle|kids?|child|children|babysit(?:ting)?|relatives?)\b/gi;
 
-    const wantsContact = (s) => CONTACT_REQUEST_RE.test((s || "").toLowerCase());
-    const wantsMeet = (s) => MEET_EXPLICIT_RE.test((s || "").toLowerCase());
-    const wantsMeetSoft = (s) => MEET_INDIRECT_RE.test((s || "").toLowerCase());
-    const mentionsAddress = (s) => ADDRESS_RE.test((s || "").toLowerCase());
-    const askName = (s) => NAME_RE.test((s || "").toLowerCase());
-    const wantsLocation = (s) => LOCATION_RE.test((s || "").toLowerCase());
-    const wantsWork = (s) => WORK_RE.test((s || "").toLowerCase());
+    const wantsContact = s => CONTACT_REQUEST_RE.test((s||'').toLowerCase());
+    const wantsMeet = s => MEET_EXPLICIT_RE.test((s||'').toLowerCase());
+    const wantsMeetSoft = s => MEET_INDIRECT_RE.test((s||'').toLowerCase());
+    const mentionsAddress= s => ADDRESS_RE.test((s||'').toLowerCase());
+    const askName = s => NAME_RE.test((s||'').toLowerCase());
+    const wantsLocation = s => LOCATION_RE.test((s||'').toLowerCase());
 
-    function deFamily(text, customerMsg) {
+    function deFamily(text, customerMsg){
       if (!text) return text;
-      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg || "");
+      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg||'');
       if (userMentionedFamily) return text;
 
       let t = String(text);
@@ -1100,124 +1055,109 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
         const pool = [
           "I've got a few things to handle tonight",
           "I promised myself a quiet evening",
-          "I've got an early start and need to relax",
+          "I've got an early start and need to wind down",
           "I'm in the middle of small chores and bits",
-          "I'm cooking and keeping it low key",
-          "My battery or data is tight so I'm keeping it light",
+          "I'm cooking and keeping it low-key",
+          "My battery data is tight so I'm keeping it light",
           "I'm catching up on work and want to stay focused",
-          "I'm staying in and keeping it simple",
+          "I'm staying in and keeping it simple"
         ];
         const pick = pool[Math.floor(Math.random() * pool.length)];
-        t = t.replace(FAMILY_WORD_RE, "").replace(/\s{2,}/g, " ").trim();
-        if (!t || t.length < 8) t = pick + ".";
-        else if (!/[.]\s*$/.test(t)) t += ".";
+        t = t.replace(FAMILY_WORD_RE, '').replace(/\s{2,}/g, ' ').trim();
+        if (!t || t.length < 8) t = pick + '.';
+        else if (!/[.]\s*$/.test(t)) t += '.';
       }
       return t;
     }
 
-    async function modelRefusal(kind, profileCard, customerMsg, llmCallFn, postFormatFn) {
+    async function modelRefusal(kind, profileCard, customerMsg){
       const tc = buildTimeContext();
+      const safeCustomer = PII.redactForLLM(customerMsg || '');
       const sys = [
-        "You are an adult woman on a dating site. Natural, warm, concise.",
-        "No meetups, contacts, or addresses. Keep everything on platform.",
-        "Be evasive and polite. Avoid policy talk.",
-        "Only use comma, period, question mark, and apostrophe. No other symbols.",
-        "Avoid family excuses unless the customer mentioned family first.",
-        "Prefer neutral reasons: timing, early start, staying in, small chores, cooking, work focus, battery or data low, bad connection, gym, pet care, travel fatigue, personal boundary.",
-        "Avoid: oh, oh wow, flattered, enthusiasm, enthusaism, sizzling, non food spicy, flirt.",
+        `You are an adult woman on a dating site. Natural, warm, concise.`,
+        `No meetups, no contacts, no addresses, no social handles, no links. Keep everything on-platform.`,
+        `Never output phone numbers, emails, usernames, handles, links, or address-like text.`,
+        `Do not output any sequence of 7 or more digits.`,
+        `Be evasive and polite, avoid policy-ish wording.`,
+        `Only use comma, period, question mark, and apostrophe. No other symbols.`,
+        `Avoid family-related excuses unless the customer explicitly mentioned family first.`,
+        `Prefer neutral reasons: timing, early start, staying in, chores, cooking, work focus, battery low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
+        `Avoid: "oh", "oh wow", "flattered", "enthusiasm", "sizzling", non-food "spicy", and "flirt".`,
+        `End with one natural open-ended question created by you, not templated.`,
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-      ].join(" ");
-      const reason =
-        kind === "meet"
-          ? "They suggested meeting or asked about availability."
-          : kind === "address"
-          ? "They asked for an address."
-          : "They asked for contacts or handle.";
-      const user = `Context: ${reason}\nCustomer: "${(customerMsg || "").slice(
-        0,
-        240
-      )}"\nReturn only the text, 1 to 2 sentences. Keep it human and light.`;
-      const concise = { max_tokens: 100, temperature: 0.3, top_p: 0.88 };
-      let out = "";
-      try {
-        out = await llmCallFn([{ role: "system", content: sys }, { role: "user", content: user }], concise);
-      } catch {}
-      out = deFamily(out || "", customerMsg);
-      out = postFormatFn(out || "");
-      return out || "I'm keeping it low key right here, thanks for understanding.";
+        (personaCardLine(profileCard)||'')
+      ].join(' ');
+      const reason = kind==='meet' ? 'They suggested meeting or asked about availability.'
+                  : kind==='address' ? 'They asked for an address.'
+                  : 'They asked for contacts or handle.';
+      const user = `Context: ${reason}\nCustomer: "${(safeCustomer||'').slice(0,240)}"\nReturn only the text, 1–2 sentences. Keep it human and light.`;
+
+      const concise = { max_tokens: 120, temperature: 0.35, top_p: 0.90 };
+      let out = '';
+      try { out = await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise); } catch {}
+      out = deFamily(out||'', customerMsg);
+      out = postFormat(out||'');
+      return out || "I'm staying in and keeping it low-key tonight, but I'm right here with you. What kind of vibe are you in right now?";
     }
 
-    async function enforceNoMeetAccept(userMsg, text, profileCard, llmCallFn, postFormatFn) {
-      const BAD =
-        /\b(?:i(?:'| )?m\s+(?:free|available)\b|we\s+can\s+(?:meet|link|hang)\b|let'?s\s+(?:meet|link|hang)\b|what\s+time\s+works\b|where\s+should\s+we\s+meet\b|i\s+can\s+pull\s+up\b|come\s+through\b)\b/i;
+    async function enforceNoMeetAccept(userMsg, text, profileCard){
+      const BAD = /\b(?:i(?:'| )?m\s+(?:free|available)\b|we\s+can\s+(?:meet|link|hang)\b|let'?s\s+(?:meet|link|hang)\b|what\s+time\s+works\b|where\s+should\s+we\s+meet\b|i\s+can\s+pull\s+up\b|come\s+through\b)\b/i;
       if (!text) return text;
-      if (BAD.test(String(text).toLowerCase())) return await modelRefusal("meet", profileCard, userMsg, llmCallFn, postFormatFn);
+      if (BAD.test(String(text).toLowerCase())){
+        return await modelRefusal('meet', profileCard, userMsg);
+      }
       return deFamily(text, userMsg);
     }
 
-    return {
-      wantsContact,
-      wantsMeet,
-      wantsMeetSoft,
-      mentionsAddress,
-      askName,
-      wantsLocation,
-      wantsWork,
-      modelRefusal,
-      enforceNoMeetAccept,
-    };
+    return { wantsContact, wantsMeet, wantsMeetSoft, mentionsAddress, askName, wantsLocation, modelRefusal, enforceNoMeetAccept };
   })();
 
   /* ======================================
-     Post-formatting and cleanup
+     Post-formatting and safe cleanup
      ====================================== */
   const ALLOWED_RE = /[^0-9A-Za-z\s\.,\?']/g;
 
-  function isFoodContext(text) {
-    return /\b(food|meal|dinner|lunch|breakfast|snack|taste|recipe|flavor|flavour|cook|cooking|spice|spices)\b/i.test(text || "");
+  function isFoodContext(text){
+    return /\b(food|meal|dinner|lunch|breakfast|snack|taste|recipe|flavor|flavour|cook|cooking|spice|spices)\b/i.test(text||'');
   }
 
-  function purgeBannedWords(s) {
-    let t = s || "";
-    t = t.replace(/\boh\s+wow\b/gi, "");
-    t = t.replace(/\boh\b/gi, "");
-    t = t.replace(/\bflattered\b/gi, "appreciated");
-    t = t.replace(/\benthusiasm(s)?\b/gi, "interest");
-    t = t.replace(/\benthusaism(s)?\b/gi, "interest");
-    t = t.replace(/\bwith\s+(?:great\s+)?enthusiasm\b/gi, "with interest");
-    t = t.replace(/\bwith\s+(?:eager|high)\s+(?:enthusiasm|excitement)\b/gi, "with interest");
-    t = t.replace(/\bsizzling\b/gi, "lively");
-    if (!isFoodContext(t)) t = t.replace(/\bspicy\b/gi, "bold");
-    t = t.replace(/\bflirty\b/gi, "playful");
-    t = t.replace(/\bflirt(?:s|ed|ing)?\b/gi, "chat");
-    t = t.replace(/\s{2,}/g, " ").trim();
+  function purgeBannedWords(s){
+    let t = (s||'');
+    t = t.replace(/\boh\s+wow\b/gi, '');
+    t = t.replace(/\boh\b/gi, '');
+    t = t.replace(/\bflattered\b/gi, 'appreciated');
+    t = t.replace(/\benthusiasm(s)?\b/gi, 'interest');
+    t = t.replace(/\benthusaism(s)?\b/gi, 'interest');
+    t = t.replace(/\bsizzling\b/gi, 'lively');
+    if (!isFoodContext(t)) t = t.replace(/\bspicy\b/gi, 'bold');
+    t = t.replace(/\bflirty\b/gi, 'playful');
+    t = t.replace(/\bflirt(?:s|ed|ing)?\b/gi, 'chat');
+    t = t.replace(/\s{2,}/g,' ').trim();
     return t;
   }
 
-  function toAscii(s) {
-    return (s || "")
-      .replace(/\u2018|\u2019/g, "'")
-      .replace(/\u201C|\u201D/g, '"')
-      .replace(/\u2032|\u02BC|`|\u00B4/g, "'")
-      .replace(/[–—\-]/g, " ")
-      .replace(/\u2026/g, "...")
-      .replace(/\r?\n+/g, " ");
+  function toAscii(s){
+    return (s||'')
+      .replace(/\u2018|\u2019/g,"'")
+      .replace(/\u201C|\u201D/g,'"')
+      .replace(/\u2032|\u02BC|`|\u00B4/g,"'")
+      .replace(/[–—\-]/g,' ')
+      .replace(/\u2026/g,'...')
+      .replace(/\r?\n+/g,' ');
   }
 
-  function smartPunct(s) {
-    let t = s || "";
-    t = t.replace(/!/g, ".");
-    t = t.replace(/[:;()]/g, " ");
-    t = t.replace(/\s*([,\.?])\s*/g, "$1 ");
-    t = t.replace(/\.{3,}/g, "...");
-    t = t.replace(/\s{2,}/g, " ");
+  function smartPunct(s){
+    let t=(s||'');
+    t=t.replace(/!/g,'.');
+    t=t.replace(/[:;()]/g,' ');
+    t=t.replace(/\s*([,\.?])\s*/g,'$1 ');
+    t=t.replace(/\.{3,}/g,'...');
+    t=t.replace(/\s{2,}/g,' ');
     return t.trim();
   }
-  function stripDisallowedPunct(s) {
-    return (s || "").replace(ALLOWED_RE, "");
-  }
+  function stripDisallowedPunct(s){return (s||'').replace(ALLOWED_RE,'');}
 
-  function fixMissingApostrophes(s) {
+  function fixMissingApostrophes(s){
     let t = s;
     const rules = [
       [/\bim\b/gi, "I'm"],
@@ -1256,227 +1196,255 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     return t;
   }
 
-  function applyLexiconPrefs(s) {
+  function applyLexiconPrefs(s){
     const LEXICON_PREFS = [
-      { from: /\binterested\b/gi, to: "curious" },
-      { from: /\bvery\b/gi, to: "" },
-      { from: /\bsexy\b/gi, to: "bold" },
-      { from: /\bunwind\b/gi, to: "relax" },
-      { from: /\berrand(s)?\b/gi, to: "small chores" },
-      { from: /\bfavo(u?)rite(s)?\b/gi, to: "best thing" },
+      { from:/\binterested\b/gi, to:'curious' },
+      { from:/\bvery\b/gi, to:'' },
+      { from:/\bsexy\b/gi, to:'bold' },
+      { from:/\bunwind\b/gi, to:'relax' },
+      { from:/\berrand(s)?\b/gi, to:'small chores' },
+      { from:/\bfavo(u?)rite(s)?\b/gi, to:'best thing' }
     ];
     let t = s;
     for (const r of LEXICON_PREFS) t = t.replace(r.from, r.to);
     return t;
   }
-
-  function normalizeSpaces(s) {
-    let t = (s || "").replace(/\s+/g, " ");
-    t = t.replace(/\s+([,\.?])/g, "$1");
-    t = t.replace(/([,\.?])(?!\s|$)/g, "$1 ");
-    t = t.replace(/\s{2,}/g, " ");
+  function normalizeSpaces(s){
+    let t=(s||'').replace(/\s+/g,' ');
+    t=t.replace(/\s+([,\.?])/g,'$1');
+    t=t.replace(/([,\.?])(?!\s|$)/g,'$1 ');
+    t=t.replace(/\s{2,}/g,' ');
     return t.trim();
   }
-  function capBoundaries(s) {
-    return s.replace(/(^|[.\s]\s+)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase());
-  }
-  function fixPronounI(s) {
+  function capBoundaries(s){return s.replace(/(^|[.\s]\s+)([a-z])/g,(m,p1,p2)=>p1+p2.toUpperCase());}
+  function fixPronounI(s){
     return s
-      .replace(/\b(i)\b/g, "I")
-      .replace(/\bi'm\b/gi, "I'm")
-      .replace(/\bi've\b/gi, "I've")
-      .replace(/\bi'd\b/gi, "I'd")
-      .replace(/\bi'll\b/gi, "I'll");
+      .replace(/\b(i)\b/g,'I')
+      .replace(/\bi'm\b/gi,"I'm")
+      .replace(/\bi've\b/gi,"I've")
+      .replace(/\bi'd\b/gi,"I'd")
+      .replace(/\bi'll\b/gi,"I'll");
   }
-  function ensureTerminalPunct(s) {
-    s = s.trim();
-    return s ? (/[\.?]$/.test(s) ? s : s + ".") : s;
-  }
-  function enforceFeminineTone(s) {
-    let t = s || "";
-    t = t.replace(/\bI'm\s+(?:a\s+)?(?:guy|man|male)\b/gi, "I'm a woman");
-    t = t.replace(/\bI\s+identify\s+as\s+(?:a\s+)?(?:man|male)\b/gi, "I identify as a woman");
-    t = t.replace(/\bI'm\s*(?:he\/him|he\/him\/his)\b/gi, "I'm she/her");
-    t = t.replace(/\bmy\s+pronouns\s*(?:are|:)\s*(?:he\/him|he\/him\/his)\b/gi, "my pronouns are she/her");
+  function ensureTerminalPunct(s){s=s.trim();return s?(/[\.?]$/.test(s)?s:(s+'.')):s;}
+  function enforceFeminineTone(s){
+    let t=s||'';
+    t=t.replace(/\bI'm\s+(?:a\s+)?(?:guy|man|male)\b/gi,"I'm a woman");
+    t=t.replace(/\bI\s+identify\s+as\s+(?:a\s+)?(?:man|male)\b/gi,"I identify as a woman");
+    t=t.replace(/\bI'm\s*(?:he\/him|he\/him\/his)\b/gi,"I'm she/her");
+    t=t.replace(/\bmy\s+pronouns\s*(?:are|:)\s*(?:he\/him|he\/him\/his)\b/gi,"my pronouns are she/her");
     return t;
   }
 
-  function postFormat(text) {
-    if (!text) return text;
-    let t = stripTimestamps(text);
-    t = t.replace(/image attached\.?/gi, "");
-    t = t.replace(/image note[^.]*\.?/gi, "");
-    t = toAscii(t);
-    t = enforceFeminineTone(t);
-    t = stripDisallowedPunct(t);
-    t = smartPunct(t);
-    t = purgeBannedWords(t);
-    t = applyLexiconPrefs(t);
-    t = fixMissingApostrophes(t);
-    t = normalizeSpaces(t);
-    t = capBoundaries(t);
-    t = fixPronounI(t);
-    if (LUXPatch?.NoRepeat?.scrub) t = LUXPatch.NoRepeat.scrub(t);
-    t = ensureTerminalPunct(t);
-    return clampToLimit(t);
+  function postFormat(text){
+    if(!text) return text;
+
+    let t = stripStampsAll(text);
+
+    // final safety net: strip any accidental PII before punctuation rules
+    if (PII.containsPII(t)) t = PII.scrubHard(t);
+
+    t=toAscii(t);
+    t=enforceFeminineTone(t);
+    t=stripDisallowedPunct(t);
+    t=smartPunct(t);
+    t=purgeBannedWords(t);
+    t=applyLexiconPrefs(t);
+    t=fixMissingApostrophes(t);
+    t=normalizeSpaces(t);
+    t=capBoundaries(t);
+    t=fixPronounI(t);
+
+    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === 'function') {
+      t = LUXPatch.NoRepeat.scrub(t);
+    }
+
+    t=ensureTerminalPunct(t);
+    t = clampToLimit(t);
+
+    // post-post safety: if something still slipped, kill it
+    if (PII.containsPII(t)) t = clampToLimit(ensureTerminalPunct(normalizeSpaces(PII.scrubHard(t))));
+
+    return t;
   }
 
-  // ===== LLM call (OpenRouter) =====
-  async function llmCall(messages, overrides = {}, modelOverride = "") {
-    if (!lux_canSendRequest()) throw new Error("Rate-limited");
+  // ===== Intent helpers =====
+  const wantsPics=(q)=>/\b(pics?|pictures?|photos?|selfie|images?|gallery|more\s+pictures?)\b/i.test((q||'').toLowerCase());
 
+  // ===== LLM call (OpenRouter) =====
+  async function llmCall(messages, overrides = {}) {
+    if (!lux_canSendRequest()) throw new Error('Rate-limited');
     const key = lux_getApiKey().trim();
-    const model = (modelOverride || GM_getValue("lux_model", MODEL_DEFAULT) || MODEL_DEFAULT).trim();
-    if (!key) throw new Error("Missing OpenRouter API key");
+    const model = GM_getValue('lux_model', MODEL_DEFAULT).trim();
+    if (!key) throw new Error('Missing OpenRouter API key');
 
     const base = getModelPreset(model);
-    const lastMsg = messages?.[messages.length - 1]?.content;
-    const lastText = typeof lastMsg === "string" ? lastMsg : JSON.stringify(lastMsg || "");
-    const tuned = withCreativeBoost(base, lastText);
-
-    let body = sanitizePayloadForModel(
-      {
-        model,
-        messages,
-        temperature: tuned.temperature,
-        top_p: tuned.top_p,
-        max_tokens: tuned.max_tokens,
-        repetition_penalty: tuned.repetition_penalty,
-        stop: tuned.stop,
-        seed: tuned.seed,
-        ...overrides,
-      },
-      model
-    );
+    const tuned = withCreativeBoost(base, (messages?.[messages.length-1]?.content)||'');
+    let body = sanitizePayloadForModel({
+      model,
+      messages,
+      temperature: tuned.temperature,
+      top_p: tuned.top_p,
+      max_tokens: tuned.max_tokens,
+      repetition_penalty: tuned.repetition_penalty,
+      stop: tuned.stop,
+      seed: tuned.seed,
+      ...overrides
+    }, model);
 
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
-        method: "POST",
+        method: 'POST',
         url: OPENROUTER_API_URL,
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-          "HTTP-Referer": location.origin,
-          "X-Title": "LUX",
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`,
+          'HTTP-Referer': location.origin,
+          'X-Title': 'LUX'
         },
         data: JSON.stringify(body),
         timeout: REQUEST_TIMEOUT_MS,
         onload: (res) => {
-          try {
-            if (res.status < 200 || res.status >= 300)
-              return reject(new Error(`OpenRouter HTTP ${res.status}: ${trimText(res.responseText, 280)}`));
-            const data = JSON.parse(res.responseText || "{}");
-            const content = data?.choices?.[0]?.message?.content?.trim();
-            if (!content) return reject(new Error("Empty content from OpenRouter"));
+          try{
+            if(res.status<200||res.status>=300) {
+              return reject(new Error(`OpenRouter HTTP ${res.status}: ${trimText(res.responseText,280)}`));
+            }
+            const data=JSON.parse(res.responseText||'{}');
+            const content=data?.choices?.[0]?.message?.content?.trim();
+            if(!content) return reject(new Error('Empty content from OpenRouter'));
             resolve(content);
-          } catch (e) {
-            reject(e);
-          }
+          }catch(e){reject(e);}
         },
-        onerror: () => reject(new Error("OpenRouter network error")),
-        ontimeout: () => reject(new Error("OpenRouter timeout")),
+        onerror:()=>reject(new Error('OpenRouter network error')),
+        ontimeout:()=>reject(new Error('OpenRouter timeout'))
       });
     });
   }
 
-  // ===== System prompt =====
-  function personaCardLine(card) {
-    if (!card) return "";
-    const bits = [];
-    if (card.realName) bits.push(`RealName: ${card.realName}`);
-    if (card.displayName) bits.push(`Username: ${card.displayName}`);
-    if (card.location) bits.push(`Location: ${card.location}`);
-    const age = lux_getProfileAge();
-    if (age) bits.push(`Age: ${age}`);
-    return bits.length ? ` Persona card, ${bits.join(", ")}.` : "";
+  // ===== PII Repair Pass (rewrite once if model output leaks) =====
+  async function repairIfPII(customerMsg, draft, leftCard){
+    let out = String(draft || '');
+    if (!PII.containsPII(out)) return out;
+
+    const safeCustomer = PII.redactForLLM(customerMsg || '');
+    const tc = buildTimeContext();
+    const sys = [
+      "You are rewriting an assistant message for a dating chat.",
+      "Hard rule: do not output phone numbers, emails, social handles, usernames, links, or address-like text.",
+      "Do not output any sequence of 7 or more digits.",
+      "Do not mention policies or rules, just write naturally.",
+      "Only use comma, period, question mark, and apostrophe.",
+      `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
+      (personaCardLine(leftCard)||'')
+    ].join(' ');
+    const user = [
+      `Customer message: "${safeCustomer.slice(0,260)}"`,
+      `Bad draft to fix: "${PII.redactForLLM(out).slice(0,260)}"`,
+      "Rewrite it as a single short paragraph, 70 to 150 words, warm and human, ending with one natural open-ended question."
+    ].join(' ');
+
+    try {
+      const fixed = await llmCall([{role:'system',content:sys},{role:'user',content:user}], { max_tokens: 180, temperature: 0.45, top_p: 0.92 });
+      out = fixed || out;
+    } catch {}
+
+    // If still leaking, hard scrub.
+    if (PII.containsPII(out)) out = PII.scrubHard(out);
+
+    // If scrubbing made it too empty, fallback to a safe but human line
+    const cleaned = postFormat(out);
+    if (!cleaned || cleaned.length < 30) {
+      const fallback = postFormat("I'm not sharing contacts, but I'm right here with you and I'm curious about you. What kind of mood are you in right now?");
+      return fallback;
+    }
+    return cleaned;
   }
 
-  function buildSystemPrompt(leftCard, customSystem, hasVision) {
-    const card = personaCardLine(leftCard) || "";
-    const modelName = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim().toLowerCase();
+  // ===== System prompt =====
+  function buildSystemPrompt(leftCard, customSystem, imageNotes){
+    const card = (personaCardLine(leftCard) || '');
+    const modelName = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim().toLowerCase();
     const tc = buildTimeContext();
 
     const baseCore = [
-      "You are an adult woman she her on a dating site.",
+      "You are an adult woman (she her) on a dating site.",
       "Your tone is natural, warm, feminine and relaxed, never robotic.",
-      "Your primary goal is to build deep, engaging rapport through short, unique messages.",
-      "Write like a real person. Avoid repetitive phrases. Vary sentence structure and word choice.",
-      "Punctuation rule: only use comma, period, question mark, and apostrophe. No other symbols.",
-      "Always respond to the latest customer message.",
-      hasVision
-        ? "If the user message includes a VISION section, treat it as the only allowed image information. Reference only what is in that VISION section. Do not invent any extra image details."
-        : "Do not mention images unless the customer explicitly mentions them.",
-      "Avoid stock filler like let's keep building the connection or build the heat connection.",
+      "Write like a real person, logical, grounded, and humane, avoid repetitive phrases.",
+      "Punctuation rule, only use comma, period, question mark, and apostrophe.",
+      "Safety, never share or ask for contacts or handles, no meetups, no dates, no addresses, keep everything on platform.",
+      "Never output phone numbers, emails, usernames, social handles, links, or address like strings.",
+      "Do not output any sequence of 7 or more digits.",
+      "If the customer shares contact info, do not repeat it back.",
       "If you need to decline something, do it briefly and pivot into a new interesting topic.",
-      "Excuses can be everyday reasons like work focus, rest, timing, small chores, or low battery, avoid family excuses unless user mentions family first.",
-      "Picture requests: always accept picture requests in a soft platform safe way. Vary wording so it does not sound templated.",
-      "Safety: never share or ask for contacts or handles, no meetups, dates, drinks, or coffee, keep everything on platform.",
-      "Location asks: share only city, never an address or specific area.",
-      "Name asks: use the real name from the profile parentheses when giving your name.",
-      "If asked what you do for work, choose an occupation that fits the profile age and keep it consistent within this chat.",
-      "Banned language: do not use oh, oh wow, any form of flattered, any form of enthusiasm or enthusaism, sizzling, non food spicy, or any flirt word.",
-      "Form: one short paragraph, no emojis, about 70 to 150 words, with an 800 character cap.",
+      "Avoid family related excuses unless the customer mentioned family first.",
+      "Banned language, do not use oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, or flirt.",
+      "Form, one short paragraph, no emojis, about 70 to 150 words.",
       `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-      "End with exactly one natural open ended question that fits the flow.",
+      "End with exactly one natural open ended question that fits the flow and is not a tired template."
     ].join(" ");
 
-    let flavor = "";
-    if (modelName.startsWith("x-ai/grok-4")) flavor = "Lean witty and quick, slightly teasing but never rude. Keep replies punchy and coherent.";
-    else if (modelName.startsWith("anthropic/claude-3.5-sonnet"))
-      flavor = "Lean softer and emotionally aware. Use gentle grounded detail, not overly poetic.";
-    else if (modelName.startsWith("openai/gpt-4.1-mini")) flavor = "Be clear, coherent, and highly responsive to the exact wording. Subtle warmth, no drama.";
-    else if (modelName.includes("llama-3.3-8b")) flavor = "Use simple direct language. Keep tone light and easy.";
-    else if (modelName.includes("llama-3.3-70b")) flavor = "Be a bit more expressive but still concise. Mirror their style without copy paste romance lines.";
-    else flavor = "Keep style balanced, warm, slightly playful, and never generic.";
+    const photoContext = (imageNotes && imageNotes.trim())
+      ? ` The customer attached a photo. Safe notes about the photo: ${imageNotes.trim()}. Only reference what is in these notes, do not invent details.`
+      : "";
 
-    const core = baseCore + " " + flavor;
-    if (customSystem && customSystem.trim()) return customSystem + " " + card;
+    let flavor = "";
+    if (modelName.startsWith("x-ai/grok-4")) {
+      flavor = "Lean witty and quick, slightly teasing without being rude. Keep it punchy.";
+    } else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) {
+      flavor = "Lean softer and emotionally aware, romantic but grounded.";
+    } else if (modelName.startsWith("openai/gpt-4.1-mini")) {
+      flavor = "Be clear, coherent, directly responsive, with subtle warmth.";
+    } else if (modelName.includes("llama-3.3-8b")) {
+      flavor = "Use simple direct language, light and easy going.";
+    } else if (modelName.includes("llama-3.3-70b")) {
+      flavor = "Be a bit more expressive but still concise and not generic.";
+    } else {
+      flavor = "Keep it balanced, warm, human, slightly playful.";
+    }
+
+    const core = baseCore + photoContext + " " + flavor;
+
+    if (customSystem && customSystem.trim()) {
+      return customSystem + " " + card;
+    }
+
     return core + card;
   }
 
   // ===== History =====
-  let shortHistory = [];
-  let lastSeen = "";
-  let lastSeenImageDataUrl = "";
-
-  function _threadKey() {
-    try {
-      const name = parseLeftProfile().realName || "Lux";
-      const path = (location.pathname || "/").slice(0, 128);
-      return `lux_thread_${name}__${path}`;
-    } catch {
-      return "lux_thread_Lux__/";
-    }
+  let shortHistory=[];let lastSeen='';
+  function _threadKey(){try{const name=(parseLeftProfile().realName||'Lux');const path=(location.pathname||'/').slice(0,128);return`lux_thread_${name}__${path}`;}catch{return'lux_thread_Lux__/';}}
+  function _loadHistory(){
+    try{
+      const raw=GM_getValue(_threadKey(),'[]');
+      const arr=JSON.parse(raw);
+      if(Array.isArray(arr)) shortHistory = arr.slice(-HISTORY_MAX);
+    }catch{}
   }
-  function _loadHistory() {
-    try {
-      const raw = GM_getValue(_threadKey(), "[]");
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) shortHistory = arr.slice(-HISTORY_MAX);
-    } catch {}
-  }
-  function _saveHistory() {
-    try {
-      GM_setValue(_threadKey(), JSON.stringify(shortHistory.slice(-HISTORY_MAX)));
-    } catch {}
-  }
+  function _saveHistory(){try{GM_setValue(_threadKey(),JSON.stringify(shortHistory.slice(-HISTORY_MAX)));}catch{}}
   _loadHistory();
 
-  function lux_cleanHistoryArray(history) {
-    return (history || []).map((msg) => {
-      const content = stripTimestamps(stripInlineImageNotes(msg.content || ""));
-      let out = content;
-      if (LUXPatch?.NoRepeat?.scrub) out = LUXPatch.NoRepeat.scrub(out);
-      return { ...msg, content: out };
-    });
+  function lux_cleanHistoryMessage(msg) {
+    const split = extractLuxImageMeta(msg.content || '');
+    const content = stripStampsAll(split.text || '');
+    // ensure history sent to model never contains PII
+    const safe = PII.redactForLLM(content || '');
+    let out = safe;
+    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === 'function') {
+      out = LUXPatch.NoRepeat.scrub(out);
+    }
+    return { ...msg, content: out };
   }
+  function lux_cleanHistoryArray(history) {
+    return (history || []).map(lux_cleanHistoryMessage);
+  }
+
   function lux_buildHistoryByTokens(history, maxTokensForHistory) {
     const cleaned = lux_cleanHistoryArray(history || []);
     let total = 0;
     const reversed = [...cleaned].reverse();
     const kept = [];
     for (const msg of reversed) {
-      const t = lux_estimateTokens(msg.content || "");
+      const t = lux_estimateTokens(msg.content || '');
       if (total + t > maxTokensForHistory) break;
       total += t;
       kept.push(msg);
@@ -1484,567 +1452,310 @@ async function lux_verifyAccessFlow({ allowPrompt = true } = {}) {
     return kept.reverse();
   }
 
-  // ===== Replies UI =====
-  function showReplies(items) {
-    ui.list.innerHTML = "";
-    items.forEach((txt) => {
-      const finalTxt = clampToLimit(stripTimestamps(txt));
-      const d = document.createElement("div");
-      d.className = "lux-reply";
-      d.textContent = finalTxt;
-      d.addEventListener("click", async () => {
-        const ok = await pasteToSite(finalTxt);
-        if (ok) ui.popup.style.display = "none";
+  // ===== UI render =====
+  function showReplies(items){
+    ui.list.innerHTML='';
+    items.forEach(txt=>{
+      const finalTxt = clampToLimit(stripStampsAll(txt));
+      const d=document.createElement('div');
+      d.className='lux-reply';
+      d.textContent=finalTxt;
+      d.addEventListener('click',async()=>{
+        const ok=await pasteToSite(finalTxt);
+        if(ok) ui.popup.style.display='none';
       });
       ui.list.appendChild(d);
     });
   }
-  function errorReply(text) {
-    console.error("[LUX] error", text);
-    lux_showErrorOverlay(String(text || "Unknown error contacting OpenRouter."));
+
+  function errorReply(text){
+    console.error('[LUX] error', text);
+    lux_showErrorOverlay(String(text || 'Unknown error contacting OpenRouter.'));
   }
 
-  // ===== Vision: last image only (better fetching) =====
-  function lux_getLastImageSrcFromNode(node) {
-    try {
-      if (!node) return "";
-      const imgs = Array.from(node.querySelectorAll("img"));
-      if (!imgs.length) return "";
-      const last = imgs[imgs.length - 1];
-      const src =
-        (last.currentSrc || "").trim() ||
-        (last.getAttribute("src") || "").trim() ||
-        (last.getAttribute("data-src") || "").trim() ||
-        "";
-      return src || "";
-    } catch {
-      return "";
-    }
-  }
-
-  async function lux_fetchImageAsDataUrl(src) {
-    if (!src) return "";
-    const s = String(src).trim();
-    if (!s) return "";
-    if (s.startsWith("data:")) return s;
-
-    let url = s;
-    try {
-      url = new URL(s, location.href).href;
-    } catch {}
-
-    return new Promise((resolve) => {
-      GM_xmlhttpRequest({
-        method: "GET",
-        url,
-        responseType: "blob",
-        timeout: 20000,
-        onload: (res) => {
-          try {
-            if (res.status < 200 || res.status >= 300) return resolve("");
-            const blob = res.response;
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ""));
-            reader.onerror = () => resolve("");
-            reader.readAsDataURL(blob);
-          } catch {
-            resolve("");
-          }
-        },
-        onerror: () => resolve(""),
-        ontimeout: () => resolve(""),
-      });
-    });
-  }
-
-  async function lux_visionAnalyze(imageDataUrl, customerText) {
-    const visionModel = (GM_getValue("lux_model_vision", MODEL_VISION_DEFAULT) || MODEL_VISION_DEFAULT).trim();
-
-    const sys = [
-      "You are a vision analyzer.",
-      "Only describe what is clearly visible.",
-      "Do not guess identity, location, age, names, or anything not visible.",
-      "Be concise and grounded.",
-      "Return STRICT JSON only with keys summary, visible_details, mood_vibe, uncertainties.",
-      "visible_details must be an array of short strings.",
-    ].join(" ");
-
-    const user = {
-      role: "user",
-      content: [
-        { type: "text", text: `Customer message context: ${String(customerText || "").slice(0, 260)}` },
-        { type: "image_url", image_url: { url: imageDataUrl } },
-      ],
-    };
-
-    let raw = "";
-    try {
-      raw = await llmCall([{ role: "system", content: sys }, user], { max_tokens: 160, temperature: 0.2, top_p: 0.9 }, visionModel);
-    } catch (e) {
-      console.warn("[LUX] vision model failed", e);
-      return null;
-    }
-
-    try {
-      const a = raw.indexOf("{");
-      const b = raw.lastIndexOf("}");
-      if (a >= 0 && b > a) return JSON.parse(raw.slice(a, b + 1));
-    } catch {}
-    return { summary: String(raw || "").slice(0, 260), visible_details: [], mood_vibe: "", uncertainties: ["parse_failed"] };
-  }
-
-  // ===== Access gating integration =====
-  let accessVerified = false;
-
-  function setLuxVisible(visible) {
-    btn.style.display = visible ? "" : "none";
-  }
-
-  function maybeEnableFromCache() {
-    const cache = lux_getAccessCache();
-    const siteConeId = lux_getSiteConeId();
-    if (cache && lux_cacheIsValid(cache)) {
-      // If we are on a page that exposes site coneid, enforce match
-      if (siteConeId && String(cache.coneId).toUpperCase() !== siteConeId) {
-        accessVerified = false;
-        setLuxVisible(false);
-        return;
-      }
-      accessVerified = true;
-      setLuxVisible(true);
-      LUXPatch.UIChips.refresh({ modelLabel: ui.model.value || "default" });
-    } else {
-      accessVerified = false;
-      setLuxVisible(false);
-    }
-  }
-
-  // At load: dashboard stays hidden unless already verified in cache
-  maybeEnableFromCache();
-
-  // ===== Backend call (main) =====
-  async function callBackend(msgText, imageDataUrl = "") {
-    // If not verified, verify now (prompt allowed here because user is actively replying)
-    if (!accessVerified) {
-      const v = await lux_verifyAccessFlow({ allowPrompt: true });
-      if (!v.ok) {
-        setLuxVisible(false);
-        lux_lockUI(v.reason || "access-denied");
-        return;
-      }
-      accessVerified = true;
-      setLuxVisible(true);
-    }
-
-    const cache = lux_getAccessCache();
-    if (cache && cache.expiresAt && Date.now() > Number(cache.expiresAt)) {
-      accessVerified = false;
-      setLuxVisible(false);
-      lux_lockUI("expired");
-      return;
-    }
-
+  // ===== Backend call =====
+  async function callBackend(msgText){
     if (!lux_canSendRequest()) return;
 
-    const leftCard = parseLeftProfile();
-    const rawMsg = stripTimestamps(stripInlineImageNotes(String(msgText || "")));
+    const leftCard=parseLeftProfile();
 
-    // Name / Location / Meet / Contact / Work routing
-    if (Safety.askName(rawMsg)) {
-      const profName = leftCard?.realName ? leftCard.realName : "Luna";
-      const sys =
-        "Natural US English. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, flirt. End with one natural open ended question.";
-      const user = `They asked your name. Use exactly: "${profName}".\nCustomer: "${rawMsg.slice(0, 240)}"`;
-      const concise = { max_tokens: 100, temperature: 0.3, top_p: 0.88 };
-      let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], concise);
-      line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard, llmCall, postFormat);
+    const rawWithMeta = stripStampsKeepMeta((msgText||'').toString());
+    const split = extractLuxImageMeta(rawWithMeta);
+    const rawMsg = stripStampsAll(split.text || '');
+    const imageNotes = (split.notes || '').trim();
+
+    // IMPORTANT: never let raw PII reach the model
+    const safeUserForLLM = PII.redactForLLM(rawMsg);
+
+    window.__LUX_LAST_USER = rawMsg;
+
+    const picAsk = wantsPics(rawMsg);
+
+    // Routed intents (Safety)
+    if(Safety.askName(rawMsg)) {
+      const profName=(leftCard&&leftCard.realName)?leftCard.realName:'Luna';
+      const sys='Natural US English. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Never output phone numbers, emails, social handles, links, or address-like text. Do not output any sequence of 7 or more digits. End with one natural open-ended question.';
+      const user=`They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard)||''} Customer: "${PII.redactForLLM(rawMsg).slice(0,240)}"`;
+      const concise = { max_tokens: 120, temperature: 0.32, top_p: 0.90 };
+      let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
+      line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
+      line = await repairIfPII(rawMsg, line, leftCard);
       line = postFormat(line);
-      showReplies([line]);
-      pushHist(rawMsg, line);
-      return;
+      showReplies([line]); pushHist(rawMsg,line); return;
     }
-
-    if (Safety.wantsLocation(rawMsg)) {
-      const profCity = leftCard?.location ? leftCard.location : "nearby";
-      const sys =
-        "If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, flirt. End with one natural open ended question.";
-      const user = `City only: "${profCity}".\nCustomer: "${rawMsg.slice(0, 240)}"`;
-      const concise = { max_tokens: 100, temperature: 0.3, top_p: 0.88 };
-      let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], concise);
-      line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard, llmCall, postFormat);
+    if(Safety.wantsLocation(rawMsg)) {
+      const profCity=(leftCard&&leftCard.location)?leftCard.location:'nearby';
+      const sys='If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Never output phone numbers, emails, social handles, links, or address-like text. Do not output any sequence of 7 or more digits. End with one natural open-ended question.';
+      const user=`City only: "${profCity}". ${personaCardLine(leftCard)||''} Customer: "${PII.redactForLLM(rawMsg).slice(0,240)}"`;
+      const concise = { max_tokens: 120, temperature: 0.32, top_p: 0.90 };
+      let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
+      line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
+      line = await repairIfPII(rawMsg, line, leftCard);
       line = postFormat(line);
-      showReplies([line]);
-      pushHist(rawMsg, line);
-      return;
+      showReplies([line]); pushHist(rawMsg,line); return;
     }
-
-    if (Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
-      let out = await Safety.modelRefusal("meet", leftCard, rawMsg, llmCall, postFormat);
-      out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard, llmCall, postFormat);
+    if(Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
+      let out = await Safety.modelRefusal('meet', leftCard, rawMsg);
+      out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
+      out = await repairIfPII(rawMsg, out, leftCard);
       out = postFormat(out);
-      showReplies([out]);
-      pushHist(rawMsg, out);
-      return;
+      showReplies([out]); pushHist(rawMsg,out); return;
     }
-
-    if (Safety.wantsContact(rawMsg) || Safety.mentionsAddress(rawMsg)) {
-      const kind = Safety.mentionsAddress(rawMsg) ? "address" : "contact";
-      let out = await Safety.modelRefusal(kind, leftCard, rawMsg, llmCall, postFormat);
+    if(Safety.wantsContact(rawMsg) || Safety.mentionsAddress(rawMsg)) {
+      let kind = Safety.mentionsAddress(rawMsg)?'address':'contact';
+      let out = await Safety.modelRefusal(kind, leftCard, rawMsg);
+      out = await repairIfPII(rawMsg, out, leftCard);
       out = postFormat(out);
-      showReplies([out]);
-      pushHist(rawMsg, out);
-      return;
+      showReplies([out]); pushHist(rawMsg,out); return;
     }
 
-    if (Safety.wantsWork(rawMsg)) {
-      const { occupation, age } = lux_getOrSetOccupation();
-      const sys =
-        "Natural US English. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, flirt. Keep it human and specific. End with one natural open ended question.";
-      const ageLine = age ? `Age is ${age}.` : "";
-      const user = `They asked what you do for work. You must say you work as a ${occupation}. ${ageLine}\nCustomer: "${rawMsg.slice(0, 240)}"`;
-      const concise = { max_tokens: 120, temperature: 0.45, top_p: 0.9 };
-      let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], concise);
-      line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard, llmCall, postFormat);
-      line = postFormat(line);
-      showReplies([line]);
-      pushHist(rawMsg, line);
-      return;
-    }
-
-    // Vision-first if we have image (auto switches by presence of imageDataUrl)
-    let vision = null;
-    if (imageDataUrl) {
-      try {
-        vision = await lux_visionAnalyze(imageDataUrl, rawMsg);
-      } catch {
-        vision = null;
-      }
-    }
-
-    const system = buildSystemPrompt(leftCard, (GM_getValue("lux_persona", "") || "").trim(), !!vision);
-    const chosenModel = (GM_getValue("lux_model", MODEL_DEFAULT) || MODEL_DEFAULT).trim();
+    const system=buildSystemPrompt(leftCard,(GM_getValue('lux_persona','')||'').trim(), imageNotes);
+    const chosenModel = GM_getValue('lux_model', MODEL_DEFAULT);
     const basePreset = getModelPreset(chosenModel);
+    const tuned = withCreativeBoost(basePreset, safeUserForLLM);
 
-    const visionBlock = vision ? `\n\nVISION, ${JSON.stringify(vision)}` : "";
-    const userText = rawMsg + visionBlock;
+    const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
+    const messages=[{role:'system',content:system},...historyForModel,{role:'user',content:safeUserForLLM}];
 
-    const tuned = withCreativeBoost(basePreset, userText);
-    const historyForModel = lux_buildHistoryByTokens(shortHistory, 2800);
-    const messages = [{ role: "system", content: system }, ...historyForModel, { role: "user", content: userText }];
+    const api=GM_getValue('lux_api_url',API_URL_DEFAULT).trim();
+    const headers={'Content-Type':'application/json'};
+    const key=lux_getApiKey().trim();
+    if(!key){ errorReply('Missing OpenRouter API key. Open LUX → Settings and paste your key.'); return; }
+    headers['Authorization']='Bearer '+key;
+    headers['HTTP-Referer']=location.origin;
+    headers['X-Title']=document.title||'LUX Userscript';
 
-    const api = (GM_getValue("lux_api_url", API_URL_DEFAULT) || API_URL_DEFAULT).trim();
-    const key = lux_getApiKey().trim();
-    if (!key) {
-      errorReply("Missing OpenRouter API key. Open LUX, Settings and paste your key.");
-      return;
-    }
-
-    const payload = sanitizePayloadForModel(
-      {
-        model: chosenModel,
-        messages,
-        temperature: tuned.temperature,
-        top_p: tuned.top_p,
-        max_tokens: tuned.max_tokens,
-        repetition_penalty: tuned.repetition_penalty,
-        stop: tuned.stop,
-        seed: tuned.seed,
-      },
-      chosenModel
-    );
+    let payload = sanitizePayloadForModel({
+      model: chosenModel,
+      messages,
+      temperature: tuned.temperature,
+      top_p: tuned.top_p,
+      max_tokens: tuned.max_tokens,
+      repetition_penalty: tuned.repetition_penalty,
+      stop: tuned.stop,
+      seed: tuned.seed
+    }, chosenModel);
 
     GM_xmlhttpRequest({
-      method: "POST",
-      url: api,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + key,
-        "HTTP-Referer": location.origin,
-        "X-Title": document.title || "LUX Userscript",
-      },
-      data: JSON.stringify(payload),
-      timeout: REQUEST_TIMEOUT_MS,
-      onload: async (res) => {
-        try {
-          if (res.status < 200 || res.status >= 300) {
+      method:'POST', url:api, headers, data:JSON.stringify(payload), timeout:REQUEST_TIMEOUT_MS,
+      onload: async (res)=>{
+        try{
+          if(res.status<200||res.status>=300){
             let msg;
-            if (res.status === 401) msg = "OpenRouter API key is invalid or unauthorized.";
-            else if (res.status === 402) msg = "OpenRouter billing or quota exceeded.";
-            else if (res.status === 404) msg = "OpenRouter endpoint or model not found.";
-            else if (res.status === 429) msg = "OpenRouter rate limit reached.";
-            else msg = `HTTP ${res.status} ${res.statusText || ""}`.trim();
+            if (res.status === 401) msg = 'OpenRouter API key is invalid or unauthorized.';
+            else if (res.status === 402) msg = 'OpenRouter billing quota exceeded (HTTP 402).';
+            else if (res.status === 404) msg = 'OpenRouter endpoint or model not found (HTTP 404).';
+            else if (res.status === 429) msg = 'OpenRouter rate limit reached (HTTP 429).';
+            else msg = `HTTP ${res.status} ${res.statusText || ''}`.trim();
             errorReply(msg);
             return;
           }
-          const data = JSON.parse(res.responseText || "{}");
-          const raw = data?.choices?.[0]?.message?.content || "";
-          if (!raw) {
-            errorReply("The server replied but no content was found.");
-            return;
-          }
-
+          const data=JSON.parse(res.responseText||'{}');
+          const raw=(data?.choices?.[0]?.message?.content||'');
+          if(!raw){ errorReply('The server replied but no content was found.'); return; }
           let content = raw;
-          content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard, llmCall, postFormat);
+
+          content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
+
+          // HARD PII repair step BEFORE formatting
+          content = await repairIfPII(rawMsg, content, leftCard);
+
           content = postFormat(content);
 
           LUXPatch.UIChips.refresh({ modelLabel: chosenModel });
           showReplies([content]);
-          pushHist(rawMsg, content);
-        } catch (e) {
-          errorReply("Parse error: " + String(e));
-        }
+          pushHist(rawMsg,content);
+        }catch(e){ errorReply('Parse error: '+String(e)); }
       },
-      onerror: () => errorReply("Network error talking to OpenRouter."),
-      ontimeout: () => errorReply("OpenRouter request timed out."),
+      onerror:()=> errorReply('Network error talking to OpenRouter.'),
+      ontimeout:()=> errorReply('OpenRouter request timed out.')
     });
   }
 
-  function pushHist(user, assistant) {
-    shortHistory.push({ role: "user", content: user }, { role: "assistant", content: assistant });
-    if (shortHistory.length > HISTORY_MAX) shortHistory.shift();
+  function pushHist(user,assistant){
+    // store redacted user in history to stop future echoes
+    const safeUser = PII.redactForLLM(stripStampsAll(user));
+    shortHistory.push({role:'user',content:safeUser},{role:'assistant',content:postFormat(assistant)});
+    if(shortHistory.length>HISTORY_MAX) shortHistory.shift();
     _saveHistory();
   }
 
   // ===== Paste plumbing =====
-  function siteInput() {
-    const el = document.querySelector(REPLY_INPUT_SELECTOR);
-    if (!el) return null;
-    const s = getComputedStyle(el);
-    const visible = s.display !== "none" && s.visibility !== "hidden" && el.offsetParent !== null;
-    const ro = el.hasAttribute("readonly") ? !el.readOnly : true;
-    const dis = el.hasAttribute("disabled") ? !el.disabled : true;
-    return visible && ro && dis ? el : null;
+  function siteInput(){
+    const el=document.querySelector(REPLY_INPUT_SELECTOR);
+    if(!el) return null;
+    const s=getComputedStyle(el);
+    const visible = s.display!=='none' && s.visibility!=='hidden' && el.offsetParent!==null;
+    const ro = el.hasAttribute('readonly') ? !el.readOnly : true;
+    const dis= el.hasAttribute('disabled') ? !el.disabled : true;
+    return (visible && ro && dis) ? el : null;
   }
-  function setNativeValue(el, value) {
-    const desc = Object.getOwnPropertyDescriptor(el, "value");
-    const proto =
-      el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
-    if (desc && desc.set) desc.set.call(el, value);
-    else if (proto) {
-      const protoDesc = Object.getOwnPropertyDescriptor(proto, "value");
-      protoDesc && protoDesc.set && protoDesc.set.call(el, value);
-    }
+  function setNativeValue(el,value){
+    const desc=Object.getOwnPropertyDescriptor(el,'value');
+    const proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:el instanceof HTMLInputElement?HTMLInputElement.prototype:null;
+    if(desc&&desc.set){desc.set.call(el,value);}
+    else if(proto){const protoDesc=Object.getOwnPropertyDescriptor(proto,'value');protoDesc&&protoDesc.set&&protoDesc.set.call(el,value);}
   }
-  function fireTypingEvents(el) {
+  function fireTypingEvents(el){
     const opts = { bubbles: true, cancelable: true };
-    try {
-      el.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertFromPaste", data: el.value }));
-    } catch {}
-    try {
-      el.dispatchEvent(new FocusEvent("focus", opts));
-    } catch {
-      el.dispatchEvent(new Event("focus", opts));
-    }
-    try {
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, inputType: "insertFromPaste", data: el.value }));
-    } catch {
-      el.dispatchEvent(new Event("input", opts));
-    }
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: " ", code: "Space", bubbles: true }));
-    el.dispatchEvent(new KeyboardEvent("keypress", { key: " ", code: "Space", bubbles: true }));
-    el.dispatchEvent(new KeyboardEvent("keyup", { key: " ", code: "Space", bubbles: true }));
-    el.dispatchEvent(new Event("change", opts));
+    try { el.dispatchEvent(new InputEvent('beforeinput', {bubbles:true,cancelable:true,inputType:'insertFromPaste',data:el.value})); } catch {}
+    try { el.dispatchEvent(new FocusEvent('focus', opts)); } catch { el.dispatchEvent(new Event('focus', opts)); }
+    try { el.dispatchEvent(new InputEvent('input', {bubbles:true,cancelable:true,inputType:'insertFromPaste',data:el.value})); } catch { el.dispatchEvent(new Event('input', opts)); }
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keypress', { key: ' ', code: 'Space', bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true }));
+    el.dispatchEvent(new Event('change', opts));
   }
-  async function pasteToSite(text) {
-    const el = siteInput();
-    if (!el) {
-      notify("Reply box not found on this page. You can still open Settings from the dashboard.");
-      return false;
-    }
-    el.scrollIntoView({ block: "nearest" });
-    el.click();
-    el.focus();
-    const final = clampToLimit(text);
+  async function pasteToSite(text){
+    const el=siteInput();
+    if(!el){ notify('Reply box not found. Update selector.'); return false; }
+    el.scrollIntoView({ block: 'nearest' }); el.click(); el.focus();
+    const final = clampToLimit(stripStampsAll(text));
     setNativeValue(el, final);
-    try {
-      el.selectionStart = el.selectionEnd = el.value.length;
-    } catch {}
+    try { el.selectionStart = el.selectionEnd = el.value.length; } catch {}
     fireTypingEvents(el);
-    if (typeof queueMicrotask === "function") queueMicrotask(() => fireTypingEvents(el));
-    else setTimeout(() => fireTypingEvents(el), 0);
+    if (typeof queueMicrotask === 'function') queueMicrotask(()=> fireTypingEvents(el)); else setTimeout(()=> fireTypingEvents(el), 0);
     return true;
   }
 
   // ===== Events =====
-  btn.addEventListener("click", () => {
-    ui.popup.style.display = "block";
+  btn.addEventListener('click',()=>{
+    ui.popup.style.display='block';
     ui.customer.focus();
-    LUXPatch.UIChips.refresh({ modelLabel: ui.model.value || "default" });
+    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
   });
-
-  ui.close.addEventListener("click", () => {
+  ui.close.addEventListener('click',()=>{
     if (LUXSettingsDirty) {
-      if (confirm("You changed LUX settings. Save before closing?")) ui.save.click();
+      if (confirm('You changed LUX settings. Save before closing?')) {
+        ui.save.click();
+      }
       LUXSettingsDirty = false;
     }
-    ui.popup.style.display = "none";
+    ui.popup.style.display='none';
   });
-
-  ui.settings.addEventListener("click", () => {
-    ui.panel.style.display = ui.panel.style.display === "none" ? "block" : "none";
+  ui.settings.addEventListener('click',()=>{
+    ui.panel.style.display = ui.panel.style.display==='none'?'block':'none';
   });
-
-  ui.save.addEventListener("click", () => {
-    GM_setValue("lux_api_url", ui.apiUrl.value.trim());
+  ui.save.addEventListener('click',()=>{
+    GM_setValue('lux_api_url', ui.apiUrl.value.trim());
     lux_setApiKey(ui.apiKey.value.trim());
-    GM_setValue("lux_model", ui.model.value.trim());
-    GM_setValue("lux_model_vision", ui.modelVision.value.trim() || MODEL_VISION_DEFAULT);
-    GM_setValue("lux_provider", ui.provider.value.trim());
-    GM_setValue("lux_persona", ui.persona.value.trim());
-    GM_setValue("lux_excuse_via_model", ui.excuseViaModel && ui.excuseViaModel.checked ? 1 : 0);
-    GM_setValue("lux_filter_enabled", ui.filterEnabled && ui.filterEnabled.checked ? 1 : 0);
-
-    LUXPatch.UIChips.refresh({ modelLabel: ui.model.value || "default" });
+    GM_setValue('lux_model', ui.model.value.trim());
+    GM_setValue('lux_provider', ui.provider.value.trim());
+    GM_setValue('lux_persona', ui.persona.value.trim());
+    GM_setValue('lux_excuse_via_model', ui.excuseViaModel && ui.excuseViaModel.checked ? 1 : 0);
+    GM_setValue('lux_filter_enabled', ui.filterEnabled && ui.filterEnabled.checked ? 1 : 0);
+    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
     LUXSettingsDirty = false;
-    alert("Saved");
+    alert('Saved');
   });
 
-  ui.apiUrl.addEventListener("input", () => (LUXSettingsDirty = true));
-  ui.apiKey.addEventListener("input", () => (LUXSettingsDirty = true));
-  ui.model.addEventListener("input", () => (LUXSettingsDirty = true));
-  ui.modelVision.addEventListener("input", () => (LUXSettingsDirty = true));
-  ui.provider.addEventListener("input", () => (LUXSettingsDirty = true));
-  ui.persona.addEventListener("input", () => (LUXSettingsDirty = true));
-  ui.excuseViaModel.addEventListener("change", () => (LUXSettingsDirty = true));
-  ui.filterEnabled.addEventListener("change", () => (LUXSettingsDirty = true));
+  ui.apiUrl.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
+  ui.apiKey.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
+  ui.model.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
+  ui.provider.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
+  ui.persona.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
+  ui.excuseViaModel.addEventListener('change', ()=>{ LUXSettingsDirty = true; });
+  ui.filterEnabled.addEventListener('change', ()=>{ LUXSettingsDirty = true; });
 
-  // Manual Send
-  ui.send.addEventListener("click", async () => {
-    const msg = stripTimestamps(stripInlineImageNotes((ui.customer.value || "").trim()));
-    if (!msg) {
-      notify("Type a message first.");
-      return;
-    }
-    const img = msg === lastSeen ? lastSeenImageDataUrl || "" : "";
-    await callBackend(msg, img);
+  ui.send.addEventListener('click', async ()=>{
+    const msg = stripStampsAll((ui.customer.value||'').trim());
+    if(!msg){ notify('Type a message first.'); return; }
+    await callBackend(msg);
   });
 
-  // Regenerate
   ui.regen.onclick = async () => {
     try {
       ui.regen.disabled = true;
-      let msg = stripTimestamps(stripInlineImageNotes((ui.customer.value || "").trim()));
+      let msg = stripStampsAll((ui.customer.value || '').trim());
       if (!msg) {
-        const lastUser = [...shortHistory].reverse().find((t) => t.role === "user");
+        const lastUser = [...shortHistory].reverse().find(t => t.role === 'user');
         if (!lastUser) return;
-        msg = lastUser.content;
+        msg = stripStampsAll(lastUser.content);
         ui.customer.value = msg;
       }
-      if (shortHistory.length && shortHistory[shortHistory.length - 1].role === "assistant") {
+      if (shortHistory.length && shortHistory[shortHistory.length - 1].role === 'assistant') {
         shortHistory.pop();
         _saveHistory();
       }
-      const img = msg === lastSeen ? lastSeenImageDataUrl || "" : "";
-      await callBackend(msg, img);
+      await callBackend(msg);
     } finally {
       ui.regen.disabled = false;
     }
   };
 
   /* ===========================
-     Thread watcher
-     - If not verified: verify when a new client message appears
-     - After verified: show LUX everywhere (including dashboard) until expiry
+     MutationObserver-based watcher
      =========================== */
-  async function processLatestTurn() {
-    const root = document.querySelector(THREAD_SEL);
-    if (!root) return;
-
-    const nodes = [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
-    const turns = [];
-    let lastUserRow = null;
-
-    for (const row of nodes) {
-      const fromClient = row.matches(CLIENT_MSG_SELECTOR);
-      const content = extractMessageContent(row);
-      if (content) turns.push({ role: fromClient ? "user" : "assistant", content: stripTimestamps(content) });
-      if (fromClient) lastUserRow = row;
+  function processLatestTurn(){
+    const root=document.querySelector(THREAD_SEL);
+    if(!root) return;
+    const nodes=[...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
+    const turns=[];
+    for(const row of nodes){
+      const fromClient=row.matches(CLIENT_MSG_SELECTOR);
+      const content=extractMessageContent(row);
+      if(content) turns.push({role: fromClient?'user':'assistant', content: stripStampsKeepMeta(content)});
     }
+    const lastUser = turns.slice().reverse().find(t=>t.role==='user');
+    if(!lastUser) return;
 
-    const lastUser = turns.slice().reverse().find((t) => t.role === "user");
-    if (!lastUser) return;
+    const split = extractLuxImageMeta(lastUser.content || '');
+    const cleanForUI = stripStampsAll(split.text || '');
 
-    const content = stripTimestamps(stripInlineImageNotes(lastUser.content || ""));
-    if (!content || content === lastSeen) return;
+    if(!cleanForUI || cleanForUI===lastSeen) return;
+    lastSeen=cleanForUI;
 
-    // If expired, hide and force re-verify on this new message
-    const cache = lux_getAccessCache();
-    if (cache && cache.expiresAt && Date.now() > Number(cache.expiresAt)) {
-      accessVerified = false;
-      setLuxVisible(false);
-    }
-
-    // Verify now on message pop (this is where we enforce ConeID-on-site match)
-    if (!accessVerified) {
-      const v = await lux_verifyAccessFlow({ allowPrompt: true });
-      if (!v.ok) {
-        setLuxVisible(false);
-        lux_lockUI(v.reason || "access-denied");
-        return;
-      }
-      accessVerified = true;
-      setLuxVisible(true);
-    }
-
-    lastSeen = content;
-
-    // Build last image data URL from the last client message ONLY
-    let imgDataUrl = "";
-    try {
-      const src = lux_getLastImageSrcFromNode(lastUserRow);
-      if (src) imgDataUrl = await lux_fetchImageAsDataUrl(src);
-    } catch {
-      imgDataUrl = "";
-    }
-    lastSeenImageDataUrl = imgDataUrl || "";
-
-    if (turns.length) {
-      shortHistory = turns.slice(-HISTORY_MAX);
+    if(turns.length){
+      shortHistory = turns.slice(-HISTORY_MAX).map(t => ({
+        role: t.role,
+        content: PII.redactForLLM(stripStampsAll(extractLuxImageMeta(t.content||'').text || ''))
+      }));
       _saveHistory();
     }
 
-    ui.customer.value = content;
-    ui.popup.style.display = "block";
+    ui.customer.value=cleanForUI;
+    ui.popup.style.display='block';
     ui.customer.focus();
-    LUXPatch.UIChips.refresh({ modelLabel: ui.model.value || "default" });
+    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
 
-    // Auto call with last image only (vision auto-switch happens when imageDataUrl exists)
-    callBackend(content, lastSeenImageDataUrl);
+    callBackend(lastUser.content);
   }
 
-  function setupThreadWatcher() {
-    const root = document.querySelector(THREAD_SEL);
-    if (!root) return false;
-    const obs = new MutationObserver(() => {
-      processLatestTurn();
-    });
-    obs.observe(root, { childList: true, subtree: true });
+  function setupThreadWatcher(){
+    const root=document.querySelector(THREAD_SEL);
+    if(!root) return false;
+    const obs = new MutationObserver(()=>{ processLatestTurn(); });
+    obs.observe(root,{childList:true,subtree:true});
     processLatestTurn();
     return true;
   }
 
-  // On dashboard: do NOT prompt. Keep hidden unless cached-allowed.
-  if (!IS_DASHBOARD) {
-    if (!setupThreadWatcher()) {
-      const fallbackId = setInterval(() => {
-        if (setupThreadWatcher()) clearInterval(fallbackId);
-      }, POLL_MS);
-    }
+  if(!setupThreadWatcher()){
+    const fallbackId = setInterval(()=>{
+      if(setupThreadWatcher()){
+        clearInterval(fallbackId);
+      }
+    }, POLL_MS);
   }
 
-  // Also periodically refresh cache visibility without prompting
-  setInterval(() => {
-    // If cached expired, hide. If cached valid, show.
-    const cache = lux_getAccessCache();
-    if (cache && cache.expiresAt && Date.now() > Number(cache.expiresAt)) {
-      accessVerified = false;
-      setLuxVisible(false);
-      return;
-    }
-    // If valid cache, keep visible
-    if (lux_cacheIsValid(cache)) {
-      accessVerified = true;
-      setLuxVisible(true);
-    }
-  }, 15_000);
 })();
