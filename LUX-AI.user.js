@@ -20,7 +20,6 @@
    LUX ConeID ACCESS CONTROL
    (STRICT: NO OFFLINE GRACE)
    ============================ */
-
 // IMPORTANT: your deployed Apps Script URL
 const ACCESS_API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxBCywRTXBGE1AgLmOPON-xmcoMg09I7ETeUc6ih-U8vpqjWXOWfsVRkwRctZdh4nQ/exec";
 
@@ -133,7 +132,6 @@ async function lux_checkOnlineAccess(coneId) {
 // v3 access cache – just remembers coneId + last state, NO GRACE
 // structure: { coneId, lastStatus, lastCheckMs, expiresAt }
 const LUX_ACCESS_CACHE_KEY_V3 = "lux_access_cache_v3";
-
 function lux_getAccessCache() {
   try {
     const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V3, "");
@@ -156,7 +154,6 @@ function lux_setAccessCache(data) {
 // STRICT gate: always re-check server, but never re-prompt ConeID unless missing
 async function lux_ensureAccess() {
   let cache = lux_getAccessCache();
-
   // 1) Ensure we have a ConeID (prompt once, then reuse)
   let coneId = cache && cache.coneId;
   if (!coneId) {
@@ -167,10 +164,8 @@ async function lux_ensureAccess() {
     }
     cache = { coneId };
   }
-
   // 2) Always ask the Apps Script on every page load
   const result = await lux_checkOnlineAccess(coneId);
-
   if (!result || !result.allowed) {
     const reason = result && result.reason ? result.reason : "not-allowed";
     lux_setAccessCache({
@@ -182,7 +177,6 @@ async function lux_ensureAccess() {
     lux_lockUI(reason);
     return false;
   }
-
   // 3) Allowed – record latest status/expiry for debugging only
   let expTs = null;
   if (result.expires) {
@@ -195,7 +189,6 @@ async function lux_ensureAccess() {
     lastCheckMs: Date.now(),
     expiresAt: expTs
   });
-
   // Access granted *immediately* as soon as sheet says allowed
   return true;
 }
@@ -203,7 +196,6 @@ async function lux_ensureAccess() {
 /* ============================
    MAIN LUX SCRIPT
    ============================ */
-
 (async function () {
   'use strict';
 
@@ -213,11 +205,9 @@ async function lux_ensureAccess() {
   // ===== Config =====
   const API_URL_DEFAULT = 'https://openrouter.ai/api/v1/chat/completions'; // OpenRouter default
   const OPENROUTER_KEY_DEFAULT = '';
-
   // MAIN DEFAULT: Grok 4 (fast)
   const MODEL_DEFAULT = 'x-ai/grok-4-fast';
   const PROVIDER_DEFAULT = 'openrouter';
-
   const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
   const POLL_MS = 3000;
   const HISTORY_MAX = 14; // still used as a soft top, but we prune by tokens too
@@ -256,7 +246,6 @@ async function lux_ensureAccess() {
     }
     return out;
   }
-
   function lux_getApiKey() {
     // migrate from old plain storage if present
     const enc = GM_getValue(LUX_API_KEY_ENC, '');
@@ -272,7 +261,6 @@ async function lux_ensureAccess() {
     }
     return OPENROUTER_KEY_DEFAULT;
   }
-
   function lux_setApiKey(plainKey) {
     const enc = lux_xorEncrypt(plainKey || '');
     GM_setValue(LUX_API_KEY_ENC, enc);
@@ -300,7 +288,6 @@ async function lux_ensureAccess() {
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
       seed: 13
     },
-
     // 2) Anthropic Sonnet – softer, emotional RP
     'anthropic/claude-3.5-sonnet': {
       temperature: 0.62,
@@ -310,7 +297,6 @@ async function lux_ensureAccess() {
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
       seed: 21
     },
-
     // 3) GPT-4.1 mini – precise, obedient, still warm
     'openai/gpt-4.1-mini': {
       temperature: 0.55,
@@ -320,7 +306,6 @@ async function lux_ensureAccess() {
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
       seed: 7
     },
-
     // 4) Free Meta Llama – 3.3 8B
     'meta-llama/llama-3.3-8b-instruct:free': {
       temperature: 0.65,
@@ -330,7 +315,6 @@ async function lux_ensureAccess() {
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
       seed: 17
     },
-
     // 5) Free Meta Llama – 3.3 70B
     'meta-llama/llama-3.3-70b-instruct:free': {
       temperature: 0.66,
@@ -351,7 +335,6 @@ async function lux_ensureAccess() {
   const LUX_RATE_WINDOW_MS = 10_000;
   const LUX_RATE_MAX_REQ = 5;
   const LUX_RATE_LOG_KEY = 'lux_req_log_v1';
-
   function lux_getReqLog() {
     try {
       return JSON.parse(GM_getValue(LUX_RATE_LOG_KEY, '[]')) || [];
@@ -373,7 +356,6 @@ async function lux_ensureAccess() {
     lux_setReqLog(log);
     return true;
   }
-
   function lux_estimateTokens(str) {
     if (!str) return 0;
     return Math.ceil(String(str).length / 4); // rough
@@ -383,7 +365,6 @@ async function lux_ensureAccess() {
   const CREATIVE_BASE = 0.0;
   const CREATIVE_MAX = 0.25;
   const LUX_CREATIVE_STATE_KEY = 'lux_creative_state_v1';
-
   function lux_getCreativeState() {
     try {
       return JSON.parse(GM_getValue(LUX_CREATIVE_STATE_KEY, '{}')) || {};
@@ -394,9 +375,8 @@ async function lux_ensureAccess() {
   function lux_setCreativeState(state) {
     GM_setValue(LUX_CREATIVE_STATE_KEY, JSON.stringify(state || {}));
   }
-
-  function scoreCreativeIntent(text){
-    const s = (text||'').toLowerCase();
+  function scoreCreativeIntent(text) {
+    const s = (text || '').toLowerCase();
     let score = 0;
     if (/\b(cute|adorable|pretty|gorgeous|fun|play|vibe|chemistry|smile|eyes|sweet)\b/.test(s)) score += 0.10;
     if (/\b(pic|pics|picture|selfie|photo|gallery)\b/.test(s)) score += 0.08;
@@ -406,7 +386,6 @@ async function lux_ensureAccess() {
     score += CREATIVE_BASE;
     return Math.max(-0.10, Math.min(CREATIVE_MAX, score));
   }
-
   function lux_getDaypart(date = new Date()) {
     const hour = date.getHours();
     if (hour < 5) return 'late-night';
@@ -415,18 +394,15 @@ async function lux_ensureAccess() {
     if (hour < 22) return 'evening';
     return 'night';
   }
-
-  function withCreativeBoost(base, msg){
+  function withCreativeBoost(base, msg) {
     const state = lux_getCreativeState();
     const history = state.history || [];
     const score = scoreCreativeIntent(msg);
     history.push(score);
     if (history.length > 5) history.shift();
     const highCount = history.filter(s => s >= 0.10).length;
-
     let temperature = base.temperature ?? 0.7;
     let top_p = base.top_p ?? 0.9;
-
     const daypart = lux_getDaypart();
     // subtle daypart shifts
     if (daypart === 'late-night' || daypart === 'night') {
@@ -434,7 +410,6 @@ async function lux_ensureAccess() {
     } else if (daypart === 'morning') {
       temperature = Math.max(temperature - 0.05, 0.45);
     }
-
     if (highCount >= 3) {
       temperature = Math.min(temperature + 0.15, 1.2);
       top_p = Math.min(top_p + 0.05, 1.0);
@@ -445,15 +420,13 @@ async function lux_ensureAccess() {
       temperature = temperature * 0.9 + base.temperature * 0.1;
       top_p = top_p * 0.9 + base.top_p * 0.1;
     }
-
     lux_setCreativeState({ history });
-
     return { ...base, temperature, top_p };
   }
 
   // ===== OpenRouter payload compatibility shim =====
-  function sanitizePayloadForModel(payload, model){
-    const m = (model||'').toLowerCase();
+  function sanitizePayloadForModel(payload, model) {
+    const m = (model || '').toLowerCase();
     const p = { ...payload };
     if ('transforms' in p) delete p.transforms;
     if ('logit_bias' in p && !p.logit_bias) delete p.logit_bias;
@@ -465,26 +438,37 @@ async function lux_ensureAccess() {
   const REPLY_INPUT_SELECTOR = 'textarea#reply-textarea.form-control.border-start-0.border-end-0';
   const PERSONA_NAME_SEL = 'h5.fw-bold.mb-1';
   const PERSONA_LOC_SEL = 'h6.text-black-50';
+  const PERSONA_AGE_SEL = 'td.p-1.ps-3.bg-light-subtle'; // Age: 40
   const THREAD_SEL = 'div#message-list.flex-grow-1.overflow-auto.p-4';
   const CLIENT_MSG_SELECTOR = 'div.d-flex.flex-row-reverse.my-2.message-box';
   const PERSONA_MSG_SELECTOR = 'div.d-flex.flex-row.my-2';
   const MEMBER_TIME_SEL = 'span#memberTime.fw-bold';
 
   // ===== Utilities =====
-  function _qs(r,s){try{return s?r.querySelector(s):null;}catch{return null;}}
-  function _qst(r,s){const el=_qs(r,s);return el?el.innerText.trim():'';}
-  function extractBracketName(s){if(!s)return'';let m=s.match(/\(([^()]*)\)\s*$/);if(!m)m=s.match(/\(([^)]+)\)/);return(m&&m[1])?m[1].trim():'';}
-  function cleanOutsideName(s){if(!s)return'';return s.replace(/\s*\([^)]*\)\s*/g,'').trim();}
-  function parseLeftProfile(){
-    const rawName=_qst(document,PERSONA_NAME_SEL);
+  function _qs(r, s) { try { return s ? r.querySelector(s) : null; } catch { return null; } }
+  function _qst(r, s) { const el = _qs(r, s); return el ? el.innerText.trim() : ''; }
+  function extractBracketName(s) { if (!s) return ''; let m = s.match(/\(([^()]*)\)\s*$/); if (!m) m = s.match(/\(([^)]+)\)/); return (m && m[1]) ? m[1].trim() : ''; }
+  function cleanOutsideName(s) { if (!s) return ''; return s.replace(/\s*\([^)]*\)\s*/g, '').trim(); }
+  function parseAgeFromText(s) {
+    const m = String(s || '').match(/\bage\s*:\s*(\d{1,3})\b/i);
+    if (!m) return null;
+    const n = parseInt(m[1], 10);
+    return Number.isFinite(n) ? n : null;
+  }
+  function parseLeftProfile() {
+    const rawName = _qst(document, PERSONA_NAME_SEL);
+    const rawAgeText = _qst(document, PERSONA_AGE_SEL);
+    const age = parseAgeFromText(rawAgeText);
     return {
       rawName,
-      realName: extractBracketName(rawName)||'',
-      displayName: cleanOutsideName(rawName)||rawName,
-      location: _qst(document,PERSONA_LOC_SEL)||'nearby'
+      realName: extractBracketName(rawName) || '',
+      displayName: cleanOutsideName(rawName) || rawName,
+      location: _qst(document, PERSONA_LOC_SEL) || 'nearby',
+      age
     };
   }
-  function getImageNotes(node){
+
+  function getImageNotes(node) {
     if (!node) return [];
     const imgs = [...node.querySelectorAll('img')];
     const notes = [];
@@ -504,7 +488,8 @@ async function lux_ensureAccess() {
     });
     return notes;
   }
-  function stripInlineImageNotes(text){
+
+  function stripInlineImageNotes(text) {
     if (!text) return '';
     let t = String(text);
     t = t.replace(/\bmessage\b\s*image\s+attached\.?/gi, '');
@@ -521,8 +506,7 @@ async function lux_ensureAccess() {
      - Keeps image-awareness by storing photo notes in an internal meta block,
        and passing that meta into the SYSTEM prompt instead of the user text.
      =========================== */
-
-  const TS_PATTERNS=[
+  const TS_PATTERNS = [
     /\[\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\]/gi,
     /\(\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\)/gi,
     /\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\b/gi,
@@ -532,105 +516,96 @@ async function lux_ensureAccess() {
     /\b\d{6,}\b/g,
     /\breport\b\.?$/gi
   ];
-  function stripTimestamps(s){
-    let t=(s||'').trim();
-    TS_PATTERNS.forEach(rx=>{ t=t.replace(rx,'').trim(); });
-    t=t.replace(/[-–—|•]+\s*$/g,'').replace(/^\s*[-–—|•]+\s*/g,'').trim();
+  function stripTimestamps(s) {
+    let t = (s || '').trim();
+    TS_PATTERNS.forEach(rx => { t = t.replace(rx, '').trim(); });
+    t = t.replace(/[-–—|•]+\s*$/g, '').replace(/^\s*[-–—|•]+\s*/g, '').trim();
     return t;
   }
 
   // Internal image meta markers (plain text, easy to regex out)
   const LUX_IMG_START = 'LUX_IMG_NOTES_START';
-  const LUX_IMG_END   = 'LUX_IMG_NOTES_END';
-
-  function stripLuxImageMeta(s){
+  const LUX_IMG_END = 'LUX_IMG_NOTES_END';
+  function stripLuxImageMeta(s) {
     if (!s) return '';
     const rx = new RegExp(`${LUX_IMG_START}[\\s\\S]*?${LUX_IMG_END}`, 'gi');
-    return String(s).replace(rx, '').replace(/\s{2,}/g,' ').trim();
+    return String(s).replace(rx, '').replace(/\s{2,}/g, ' ').trim();
   }
-
-  function extractLuxImageMeta(s){
+  function extractLuxImageMeta(s) {
     const str = String(s || '');
     const rx = new RegExp(`${LUX_IMG_START}\\s*([\\s\\S]*?)\\s*${LUX_IMG_END}`, 'i');
     const m = str.match(rx);
     const notes = m && m[1] ? String(m[1]).trim() : '';
     const clean = str.replace(new RegExp(`${LUX_IMG_START}[\\s\\S]*?${LUX_IMG_END}`, 'gi'), '');
-    return { text: clean.replace(/\s{2,}/g,' ').trim(), notes };
+    return { text: clean.replace(/\s{2,}/g, ' ').trim(), notes };
   }
 
-  function stripTrailingStampLines(s){
+  function stripTrailingStampLines(s) {
     if (!s) return '';
     const isTimeOnly = l => /^(\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)?)$/i.test(l);
     const isDateOnly = l => /^(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|20\d{2}[\/\-]\d{1,2}[\/\-]\d{1,2})$/i.test(l);
-
     const isStampLine = (l) => {
       if (!l) return false;
       const line = String(l).trim();
       if (!line) return false;
       if (line.length > 80) return false;
-
       // common “message/image stamp” tails
       if (/^(sent|delivered|seen|read|edited|today|yesterday)\b/i.test(line)) return true;
       if (/^(message|image|photo|picture)\b.*\b(sent|delivered|seen|read)\b/i.test(line)) return true;
-
       // e.g. "Seen 1:22 PM", "Delivered at 13:04"
       if (/\b(sent|delivered|seen|read)\b\s*(?:at\s*)?\d{1,2}:\d{2}/i.test(line)) return true;
-
       // standalone time/date lines
       if (isTimeOnly(line) || isDateOnly(line)) return true;
-
       return false;
     };
-
     // strip trailing stamp-like lines
     let lines = String(s).split(/\r?\n/).map(x => x.trim());
-    while (lines.length && !lines[lines.length-1]) lines.pop();
-    while (lines.length && isStampLine(lines[lines.length-1])) lines.pop();
-
-    return lines.join(' ').replace(/\s{2,}/g,' ').trim();
+    while (lines.length && !lines[lines.length - 1]) lines.pop();
+    while (lines.length && isStampLine(lines[lines.length - 1])) lines.pop();
+    return lines.join(' ').replace(/\s{2,}/g, ' ').trim();
   }
 
   // Use this when you want a fully clean message (no timestamps, no platform stamps, no image meta)
-  function stripStampsAll(s){
+  function stripStampsAll(s) {
     let t = String(s || '');
     t = stripLuxImageMeta(t);
     t = stripTimestamps(t);
     t = stripTrailingStampLines(t);
     return t.trim();
   }
-
   // Use this when you still want to preserve image meta (so we can feed notes to SYSTEM prompt),
   // but remove timestamps/platform stamps.
-  function stripStampsKeepMeta(s){
+  function stripStampsKeepMeta(s) {
     let t = String(s || '');
     t = stripTimestamps(t);
     t = stripTrailingStampLines(t);
     return t.trim();
   }
 
-  function extractMessageContent(node){
+  function extractMessageContent(node) {
     const rawText = (node?.innerText || '').trim();
     // strip stamps the platform appends to the end of the visible message
     const text = stripStampsAll(stripInlineImageNotes(rawText));
-
     // capture image notes WITHOUT adding "image stamp" text into the customer message
     const imageNotes = getImageNotes(node);
     if (!imageNotes.length) return text;
-
     const meta = `${LUX_IMG_START} ${imageNotes.join(' | ')} ${LUX_IMG_END}`;
     // meta is kept internal (we remove it before showing in textarea and before final outputs)
     return text ? `${text}\n${meta}` : meta;
   }
 
-  function personaCardLine(card){
-    if(!card) return '';
-    const bits=[]; if(card.realName) bits.push(`RealName: ${card.realName}`);
-    if(card.displayName)bits.push(`Username: ${card.displayName}`);
-    if(card.location) bits.push(`Location: ${card.location}`);
+  function personaCardLine(card) {
+    if (!card) return '';
+    const bits = [];
+    if (card.realName) bits.push(`RealName: ${card.realName}`);
+    if (card.displayName) bits.push(`Username: ${card.displayName}`);
+    if (card.location) bits.push(`Location: ${card.location}`);
+    if (Number.isFinite(card.age)) bits.push(`Age: ${card.age}`);
     return bits.length ? ` Persona card, ${bits.join(', ')}.` : '';
   }
-  function notify(text){try{GM_notification({text,title:'LUX',timeout:3500});}catch{console.log('[LUX]',text);} }
-  function trimText(s,max){ s = (s||'').toString(); return s.length>max ? s.slice(0,max)+'...' : s; }
+
+  function notify(text) { try { GM_notification({ text, title: 'LUX', timeout: 3500 }); } catch { console.log('[LUX]', text); } }
+  function trimText(s, max) { s = (s || '').toString(); return s.length > max ? s.slice(0, max) + '...' : s; }
 
   // ===== Limits: hard cap =====
   const MAX_CHARS = 800;
@@ -646,25 +621,25 @@ async function lux_ensureAccess() {
 
   // ===== Raw page day/time & daypart (with REAL day name) =====
   function buildTimeContext() {
-    const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    const dayShort = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const el = document.querySelector(MEMBER_TIME_SEL);
     const raw = el?.textContent?.trim() || '';
     const parseHour24 = (txt) => {
       const m = txt.match(/(\d{1,2})[:.](\d{2})(?:\s*([AP]\.?M\.?))?/i);
       if (!m) return NaN;
-      let h = parseInt(m[1],10);
-      const ap = (m[3]||'').replace(/\./g,'').toUpperCase();
+      let h = parseInt(m[1], 10);
+      const ap = (m[3] || '').replace(/\./g, '').toUpperCase();
       if (!ap) return Math.min(23, Math.max(0, h));
       if (ap === 'AM') { if (h === 12) h = 0; }
       else if (ap === 'PM') { if (h !== 12) h += 12; }
       return h;
     };
     const parseDayIndex = (txt) => {
-      const s = (txt||'').toLowerCase();
-      const map = {sun:0, mon:1, tue:2, tues:2, wed:3, thu:4, thur:4, fri:5, sat:6};
+      const s = (txt || '').toLowerCase();
+      const map = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, fri: 5, sat: 6 };
       const long = s.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
-      if (long) return ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'].indexOf(long[0]);
+      if (long) return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(long[0]);
       const short = s.match(/\b(sun|mon|tue|tues|wed|thu|thur|fri|sat)\b/);
       if (short) return map[short[0]];
       return NaN;
@@ -672,36 +647,23 @@ async function lux_ensureAccess() {
     const now = new Date();
     const hour24 = Number.isFinite(parseHour24(raw)) ? parseHour24(raw) : now.getHours();
     const dayIndex = Number.isFinite(parseDayIndex(raw)) ? parseDayIndex(raw) : now.getDay();
-    const dayName = dayNames[dayIndex] || now.toLocaleDateString(undefined,{weekday:'long'});
-    const daypart = (h)=> (h>=5 && h<12)?'morning':(h<17)?'afternoon':(h<22)?'evening':'night';
-    const fallbackTime = now.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+    const dayName = dayNames[dayIndex] || now.toLocaleDateString(undefined, { weekday: 'long' });
+    const daypart = (h) => (h >= 5 && h < 12) ? 'morning' : (h < 17) ? 'afternoon' : (h < 22) ? 'evening' : 'night';
+    const fallbackTime = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     const fallbackDayShort = dayShort[now.getDay()];
     const rawDayTime = raw && /\d/.test(raw) ? raw : `${fallbackDayShort} ${fallbackTime}`;
     return { hour24, dayIndex, dayName, daypart: daypart(hour24), rawDayTime, raw };
   }
 
   // ===== Base Styles =====
-  const css=document.createElement('style');
-  css.textContent=`
-#lux-btn{position:fixed;bottom:20px;right:20px;z-index:99999;background:#0b3d91;color:#fff;border:0;padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(11,61,145,.3)}
-#lux-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:820px;max-width:98vw;max-height:84vh;overflow:auto;background:#1f1f1f;color:#eee;border:2px solid #0b3d91;border-radius:14px;padding:14px;z-index:100000;display:none;font-family:system-ui,sans-serif}
-#lux-responses{display:flex;flex-direction:column;gap:8px}
-.lux-reply{white-space:pre-wrap;border:1px solid #3a4155;border-radius:10px;padding:10px;background:#252525;color:#eaeaea;cursor:pointer}
-#lux-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-#lux-actions button{flex:1 1 150px}
-#lux-settings-panel{display:none;margin-top:8px;border:1px solid #3a4155;border-radius:8px;padding:8px;background:#222;color:#eaeaea}
-#lux-settings-panel input[type=text],#lux-settings-panel textarea{width:100%;padding:6px;border:1px solid #3a4155;background:#1a1a1a;color:#eaeaea;border-radius:6px;margin:4px 0}
-#lux-models{background:#2b3545;color:#bcd7ff;border:0;border-radius:8px;padding:8px 10px;font-weight:700}
-#lux-models-panel{display:none;margin-top:8px;border:1px dashed #3c4c66;border-radius:8px;padding:8px}
-#lux-models-panel .lux-model{margin:4px;padding:6px 10px;border:1px solid #3c4c66;border-radius:8px;background:#1f2937;color:#cfe0ff;cursor:pointer}
-#lux-models-panel .lux-tag{display:inline-block;background:#0b3d91;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px}
-  `;
+  const css = document.createElement('style');
+  css.textContent = `#lux-btn{position:fixed;bottom:20px;right:20px;z-index:99999;background:#0b3d91;color:#fff;border:0;padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(11,61,145,.3)}#lux-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:820px;max-width:98vw;max-height:84vh;overflow:auto;background:#1f1f1f;color:#eee;border:2px solid #0b3d91;border-radius:14px;padding:14px;z-index:100000;display:none;font-family:system-ui,sans-serif}#lux-responses{display:flex;flex-direction:column;gap:8px}.lux-reply{white-space:pre-wrap;border:1px solid #3a4155;border-radius:10px;padding:10px;background:#252525;color:#eaeaea;cursor:pointer}#lux-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}#lux-actions button{flex:1 1 150px}#lux-settings-panel{display:none;margin-top:8px;border:1px solid #3a4155;border-radius:8px;padding:8px;background:#222;color:#eaeaea}#lux-settings-panel input[type=text],#lux-settings-panel textarea{width:100%;padding:6px;border:1px solid #3a4155;background:#1a1a1a;color:#eaeaea;border-radius:6px;margin:4px 0}#lux-models{background:#2b3545;color:#bcd7ff;border:0;border-radius:8px;padding:8px 10px;font-weight:700}#lux-models-panel{display:none;margin-top:8px;border:1px dashed #3c4c66;border-radius:8px;padding:8px}#lux-models-panel .lux-model{margin:4px;padding:6px 10px;border:1px solid #3c4c66;border-radius:8px;background:#1f2937;color:#cfe0ff;cursor:pointer}#lux-models-panel .lux-tag{display:inline-block;background:#0b3d91;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px}`;
   document.head.appendChild(css);
 
   // ===== UI Root =====
-  const btn=document.createElement('button');btn.id='lux-btn';btn.textContent='LUX';document.body.appendChild(btn);
-  const pop=document.createElement('div');pop.id='lux-popup';
-  pop.innerHTML=`
+  const btn = document.createElement('button'); btn.id = 'lux-btn'; btn.textContent = 'LUX'; document.body.appendChild(btn);
+  const pop = document.createElement('div'); pop.id = 'lux-popup';
+  pop.innerHTML = `
   <div id="lux-topbar" style="margin-bottom:8px"></div>
   <textarea id="lux-customer" placeholder="Latest customer message" style="width:100%;min-height:96px;border:1px solid #3a4155;background:#2a2a2a;color:#fff;border-radius:8px;padding:8px;margin:8px 0"></textarea>
   <div id="lux-responses"></div>
@@ -727,26 +689,26 @@ async function lux_ensureAccess() {
   </div>`;
   document.body.appendChild(pop);
 
-  const ui={
-    popup:pop,
-    topbar:pop.querySelector('#lux-topbar'),
-    customer:pop.querySelector('#lux-customer'),
-    list:pop.querySelector('#lux-responses'),
-    send:pop.querySelector('#lux-send'),
-    regen:pop.querySelector('#lux-regen'),
-    models:pop.querySelector('#lux-models'),
-    modelsPanel:pop.querySelector('#lux-models-panel'),
-    settings:pop.querySelector('#lux-settings'),
-    close:pop.querySelector('#lux-close'),
-    panel:pop.querySelector('#lux-settings-panel'),
-    apiUrl:pop.querySelector('#lux-api-url'),
-    apiKey:pop.querySelector('#lux-api-key'),
-    model:pop.querySelector('#lux-model'),
-    provider:pop.querySelector('#lux-provider'),
-    persona:pop.querySelector('#lux-persona'),
-    excuseViaModel:pop.querySelector('#lux-excuse-via-model'),
-    filterEnabled:pop.querySelector('#lux-filter-enabled'),
-    save:pop.querySelector('#lux-save'),
+  const ui = {
+    popup: pop,
+    topbar: pop.querySelector('#lux-topbar'),
+    customer: pop.querySelector('#lux-customer'),
+    list: pop.querySelector('#lux-responses'),
+    send: pop.querySelector('#lux-send'),
+    regen: pop.querySelector('#lux-regen'),
+    models: pop.querySelector('#lux-models'),
+    modelsPanel: pop.querySelector('#lux-models-panel'),
+    settings: pop.querySelector('#lux-settings'),
+    close: pop.querySelector('#lux-close'),
+    panel: pop.querySelector('#lux-settings-panel'),
+    apiUrl: pop.querySelector('#lux-api-url'),
+    apiKey: pop.querySelector('#lux-api-key'),
+    model: pop.querySelector('#lux-model'),
+    provider: pop.querySelector('#lux-provider'),
+    persona: pop.querySelector('#lux-persona'),
+    excuseViaModel: pop.querySelector('#lux-excuse-via-model'),
+    filterEnabled: pop.querySelector('#lux-filter-enabled'),
+    save: pop.querySelector('#lux-save'),
   };
 
   // Load settings (with encrypted key)
@@ -754,21 +716,22 @@ async function lux_ensureAccess() {
   ui.apiKey.value = lux_getApiKey();
   ui.model.value = GM_getValue('lux_model', MODEL_DEFAULT);
   ui.provider.value = GM_getValue('lux_provider', PROVIDER_DEFAULT);
-  ui.persona.value = GM_getValue('lux_persona','');
-  ui.excuseViaModel.checked = GM_getValue('lux_excuse_via_model',1)===1;
-  ui.filterEnabled.checked = !!GM_getValue('lux_filter_enabled',0);
+  ui.persona.value = GM_getValue('lux_persona', '');
+  ui.excuseViaModel.checked = GM_getValue('lux_excuse_via_model', 1) === 1;
+  ui.filterEnabled.checked = !!GM_getValue('lux_filter_enabled', 0);
 
   // ===== Models picker =====
   const modelChoices = [
-    'x-ai/grok-4-fast',                         // default
+    'x-ai/grok-4-fast', // default
     'anthropic/claude-3.5-sonnet',
     'openai/gpt-4.1-mini',
     'meta-llama/llama-3.3-8b-instruct:free',
     'meta-llama/llama-3.3-70b-instruct:free',
   ];
+
   let LUXSettingsDirty = false;
 
-  function renderModelButtons(){
+  function renderModelButtons() {
     const cur = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim();
     const p = ui.modelsPanel;
     p.innerHTML = '';
@@ -776,7 +739,6 @@ async function lux_ensureAccess() {
     head.style.marginBottom = '6px';
     head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || 'default'}</span>`;
     p.appendChild(head);
-
     modelChoices.forEach(m => {
       const b = document.createElement('button');
       b.className = 'lux-model';
@@ -799,24 +761,23 @@ async function lux_ensureAccess() {
       p.appendChild(b);
     });
   }
-  function toggleModelsPanel(){
+  function toggleModelsPanel() {
     const p = ui.modelsPanel;
     const open = getComputedStyle(p).display !== 'none' && getComputedStyle(p).visibility !== 'hidden';
-    if (open){ p.style.display = 'none'; p.style.visibility = 'hidden'; }
+    if (open) { p.style.display = 'none'; p.style.visibility = 'hidden'; }
     else { renderModelButtons(); p.style.display = 'block'; p.style.visibility = 'visible'; }
   }
   ui.models.addEventListener('click', toggleModelsPanel);
 
   // ===== LUXPatch namespaces =====
-  const LUXPatch = (typeof window.LUXPatch!=='undefined' ? window.LUXPatch : (window.LUXPatch = {}));
+  const LUXPatch = (typeof window.LUXPatch !== 'undefined' ? window.LUXPatch : (window.LUXPatch = {}));
 
   /* ===========================
      PATCH: UI Topbar Chips
-     =========================== */
-  LUXPatch.UIChips = (()=>{
-
-    const ids = { topbar:'lux-topbar', chipModel:'lux-chip-model', chipDaypart:'lux-chip-daypart' };
-    function ensureStyles(){
+     ============================ */
+  LUXPatch.UIChips = (() => {
+    const ids = { topbar: 'lux-topbar', chipModel: 'lux-chip-model', chipDaypart: 'lux-chip-daypart' };
+    function ensureStyles() {
       if (document.getElementById('luxpatch-chips-style')) return;
       const css = document.createElement('style');
       css.id = 'luxpatch-chips-style';
@@ -827,11 +788,11 @@ async function lux_ensureAccess() {
       `;
       document.head.appendChild(css);
     }
-    function timeChipLabel(){
+    function timeChipLabel() {
       const tc = buildTimeContext();
       return `${tc.rawDayTime} • ${tc.daypart} • ${tc.dayName}`;
     }
-    function mountTopbar(container){
+    function mountTopbar(container) {
       ensureStyles();
       if (!container) return null;
       const top = document.createElement('div');
@@ -843,29 +804,28 @@ async function lux_ensureAccess() {
           <span class="luxpatch-chip" id="${ids.chipDaypart}">—</span>
         </div>`;
       container.appendChild(top);
-      refresh({modelLabel:'default'});
+      refresh({ modelLabel: 'default' });
       return top;
     }
-    function refresh({modelLabel}){
-      const m=document.getElementById(ids.chipModel);
-      const d=document.getElementById(ids.chipDaypart);
-      if(m && modelLabel) m.textContent=`model: ${modelLabel}`;
-      if(d) d.textContent=timeChipLabel();
+    function refresh({ modelLabel }) {
+      const m = document.getElementById(ids.chipModel);
+      const d = document.getElementById(ids.chipDaypart);
+      if (m && modelLabel) m.textContent = `model: ${modelLabel}`;
+      if (d) d.textContent = timeChipLabel();
     }
-    function unmount(){const n=document.getElementById(ids.topbar); if(n) n.remove();}
+    function unmount() { const n = document.getElementById(ids.topbar); if (n) n.remove(); }
     return { mountTopbar, refresh, unmount, ids };
   })();
 
   // Mount topbar chips now:
   LUXPatch.UIChips.mountTopbar(ui.topbar);
-  LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
+  LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || 'default') });
 
   /* ===========================
      PATCH: No-Repeat Guard
      (substitution-based, with extra template killers)
-     =========================== */
-  LUXPatch.NoRepeat = (()=>{
-
+     ============================ */
+  LUXPatch.NoRepeat = (() => {
     const bannedPhrases = [
       "early start",
       "quiet evening",
@@ -893,7 +853,6 @@ async function lux_ensureAccess() {
       "build our heat",
       "I’m a bit shy to share my contact",
       "I'm a bit shy to share my contact",
-
       // extra template killers:
       "what do you do to relax on a thursday morning or evening",
       "what do you do to relax on a thursday evening",
@@ -908,7 +867,6 @@ async function lux_ensureAccess() {
       /keep\s+building\s+(?:the\s+)?(?:heat|connection)/gi,
       /\bbuild(?:ing)?\s+(?:the\s+|our\s+)?(?:heat|connection)\b/gi
     ];
-
     const substitutionPool = [
       "I'm happy staying right here in our chat.",
       "I like keeping things simple and cozy between us here.",
@@ -951,9 +909,9 @@ async function lux_ensureAccess() {
       out = out.replace(/\b(\w+(?:\s+\w+){0,2})\b([,;:])\s+\1\b/gi, '$1');
       return out;
     }
-    function patterns(){ return []; }
-    function excuseFrags(){ return []; }
-    function scrub(text){
+    function patterns() { return []; }
+    function excuseFrags() { return []; }
+    function scrub(text) {
       const substituted = substitute(text);
       return dedupePhrases(substituted);
     }
@@ -971,23 +929,21 @@ async function lux_ensureAccess() {
     const ADDRESS_RE = /\b(address|house|apartment|home|street|avenue|road|rd\.?|st\.?)\b/i;
     const NAME_RE = /\b(what(?:'| i)?s\s+your\s+name|ur\s*name|name\s*please|name\s*pls|who\s+are\s+you)\b/i;
     const LOCATION_RE = /\b(where\s+do\s+you\s+(?:live|stay)|where\s+are\s+you|what\s+city|your\s+city|your\s+location|where\s+are\s+you\s+based|where\s+are\s+u\s+at|what\s+part\s+are\s+you\s+in|where\s+do\s+you\s+reside|what\s+part\s+of\s+town|where\s+you\s+located|where\s+are\s+you\s+located)\b/i;
-
     // If user mentions family first, we may mirror it; otherwise we avoid it.
     const USER_MENTIONS_FAMILY_RE = /\b(family|my\s+(?:sister|brother|mom|mother|dad|father|parents?|cousin|aunt|uncle|kids?|child|niece|nephew)|babysit(?:ting)?|family\s+issues?)\b/i;
     const FAMILY_WORD_RE = /\b(family|mom|mother|dad|father|parents?|sister|brother|cousin|aunt|uncle|kids?|child|children|babysit(?:ting)?|relatives?)\b/gi;
 
-    const wantsContact = s => CONTACT_REQUEST_RE.test((s||'').toLowerCase());
-    const wantsMeet = s => MEET_EXPLICIT_RE.test((s||'').toLowerCase());
-    const wantsMeetSoft = s => MEET_INDIRECT_RE.test((s||'').toLowerCase());
-    const mentionsAddress= s => ADDRESS_RE.test((s||'').toLowerCase());
-    const askName = s => NAME_RE.test((s||'').toLowerCase());
-    const wantsLocation = s => LOCATION_RE.test((s||'').toLowerCase());
+    const wantsContact = s => CONTACT_REQUEST_RE.test((s || '').toLowerCase());
+    const wantsMeet = s => MEET_EXPLICIT_RE.test((s || '').toLowerCase());
+    const wantsMeetSoft = s => MEET_INDIRECT_RE.test((s || '').toLowerCase());
+    const mentionsAddress = s => ADDRESS_RE.test((s || '').toLowerCase());
+    const askName = s => NAME_RE.test((s || '').toLowerCase());
+    const wantsLocation = s => LOCATION_RE.test((s || '').toLowerCase());
 
-    function deFamily(text, customerMsg){
+    function deFamily(text, customerMsg) {
       if (!text) return text;
-      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg||'');
+      const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg || '');
       if (userMentionedFamily) return text;
-
       let t = String(text);
       if (FAMILY_WORD_RE.test(t)) {
         const pool = [
@@ -1008,7 +964,7 @@ async function lux_ensureAccess() {
       return t;
     }
 
-    async function modelRefusal(kind, profileCard, customerMsg){
+    async function modelRefusal(kind, profileCard, customerMsg) {
       const tc = buildTimeContext();
       const sys = [
         `You are an adult woman on a dating site. Natural, warm, concise.`,
@@ -1018,27 +974,26 @@ async function lux_ensureAccess() {
         `Avoid family-related excuses (family, parents, kids, babysitting, relatives) unless the customer explicitly mentioned family first.`,
         `Prefer neutral reasons: timing/early start, staying in, errands/chores, cooking, work focus, battery/data low, bad connection, gym, pet care, travel fatigue, personal boundary.`,
         `Avoid: "oh", "oh wow", "flattered*", "enthusiasm* / enthusaism*", "sizzling", non-food "spicy", and "flirt*".`,
-        `End with one natural, flow-matching open-ended question created by you. No templates.`,
+        `End with one natural open-ended question that matches the customer's tone and what they just said. If they are flirty, make it playful. If they are serious, make it thoughtful. If they are upset, make it calming and clarifying. No templates.`,
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-        (personaCardLine(profileCard)||'')
+        (personaCardLine(profileCard) || '')
       ].join(' ');
-      const reason = kind==='meet' ? 'They suggested meeting or asked about availability.'
-                  : kind==='address' ? 'They asked for an address.'
-                  : 'They asked for contacts/handle.';
-      const user = `Context: ${reason}\nCustomer: "${(customerMsg||'').slice(0,240)}"\nReturn only the text, 1–2 sentences. Keep it human and light.`;
-
+      const reason = kind === 'meet' ? 'They suggested meeting or asked about availability.'
+        : kind === 'address' ? 'They asked for an address.'
+          : 'They asked for contacts/handle.';
+      const user = `Context: ${reason}\nCustomer: "${(customerMsg || '').slice(0, 240)}"\nReturn only the text, 1–2 sentences. Keep it human and light.`;
       const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
       let out = '';
-      try { out = await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise); } catch {}
-      out = deFamily(out||'', customerMsg);
-      out = postFormat(out||'');
+      try { out = await llmCall([{ role: 'system', content: sys }, { role: 'user', content: user }], concise); } catch { }
+      out = deFamily(out || '', customerMsg);
+      out = postFormat(out || '');
       return out || "I’m keeping it here and low-key, thanks for understanding.";
     }
 
-    async function enforceNoMeetAccept(userMsg, text, profileCard){
+    async function enforceNoMeetAccept(userMsg, text, profileCard) {
       const BAD = /\b(?:i(?:'| )?m\s+(?:free|available)\b|we\s+can\s+(?:meet|link|hang)\b|let'?s\s+(?:meet|link|hang)\b|what\s+time\s+works\b|where\s+should\s+we\s+meet\b|i\s+can\s+pull\s+up\b|come\s+through\b)\b/i;
       if (!text) return text;
-      if (BAD.test(String(text).toLowerCase())){
+      if (BAD.test(String(text).toLowerCase())) {
         return await modelRefusal('meet', profileCard, userMsg);
       }
       return deFamily(text, userMsg);
@@ -1051,13 +1006,11 @@ async function lux_ensureAccess() {
      Post-formatting and safe cleanup
      ====================================== */
   const ALLOWED_RE = /[^0-9A-Za-z\s\.,\?']/g;
-
-  function isFoodContext(text){
-    return /\b(food|meal|dinner|lunch|breakfast|snack|taste|recipe|flavor|flavour|cook|cooking|spice|spices)\b/i.test(text||'');
+  function isFoodContext(text) {
+    return /\b(food|meal|dinner|lunch|breakfast|snack|taste|recipe|flavor|flavour|cook|cooking|spice|spices)\b/i.test(text || '');
   }
-
-  function purgeBannedWords(s){
-    let t = (s||'');
+  function purgeBannedWords(s) {
+    let t = (s || '');
     t = t.replace(/\boh\s+wow\b/gi, '');
     t = t.replace(/\boh\b/gi, '');
     t = t.replace(/\bflattered\b/gi, 'appreciated');
@@ -1071,32 +1024,29 @@ async function lux_ensureAccess() {
     t = t.replace(/\bflirt(?:s|ed|ing)?\b/gi, 'chat');
     t = t.replace(/let['’]?s\s+keep\s+(?:the\s+)?(?:conversation|chat)\s+(?:sizzling|fun\s+and\s+hot|spicy|going)\s+here\b/gi, "let's stay here and talk more");
     t = t.replace(/keep\s+(?:it\s+)?(?:fun|hot|sizzling)\b/gi, 'let’s keep talking');
-    t = t.replace(/\s{2,}/g,' ').trim();
+    t = t.replace(/\s{2,}/g, ' ').trim();
     return t;
   }
-
-  function toAscii(s){
-    return (s||'')
-      .replace(/\u2018|\u2019/g,"'")
-      .replace(/\u201C|\u201D/g,'"')
-      .replace(/\u2032|\u02BC|`|\u00B4/g,"'")
-      .replace(/[–—\-]/g,' ')
-      .replace(/\u2026/g,'...')
-      .replace(/\r?\n+/g,' ');
+  function toAscii(s) {
+    return (s || '')
+      .replace(/\u2018|\u2019/g, "'")
+      .replace(/\u201C|\u201D/g, '"')
+      .replace(/\u2032|\u02BC|`|\u00B4/g, "'")
+      .replace(/[–—\-]/g, ' ')
+      .replace(/\u2026/g, '...')
+      .replace(/\r?\n+/g, ' ');
   }
-
-  function smartPunct(s){
-    let t=(s||'');
-    t=t.replace(/!/g,'.');
-    t=t.replace(/[:;()]/g,' ');
-    t=t.replace(/\s*([,\.?])\s*/g,'$1 ');
-    t=t.replace(/\.{3,}/g,'...');
-    t=t.replace(/\s{2,}/g,' ');
+  function smartPunct(s) {
+    let t = (s || '');
+    t = t.replace(/!/g, '.');
+    t = t.replace(/[:;()]/g, ' ');
+    t = t.replace(/\s*([,\.?])\s*/g, '$1 ');
+    t = t.replace(/\.{3,}/g, '...');
+    t = t.replace(/\s{2,}/g, ' ');
     return t.trim();
   }
-  function stripDisallowedPunct(s){return (s||'').replace(ALLOWED_RE,'');}
-
-  function fixMissingApostrophes(s){
+  function stripDisallowedPunct(s) { return (s || '').replace(ALLOWED_RE, ''); }
+  function fixMissingApostrophes(s) {
     let t = s;
     const rules = [
       [/\bim\b/gi, "I'm"],
@@ -1134,71 +1084,78 @@ async function lux_ensureAccess() {
     for (const [re, to] of rules) t = t.replace(re, to);
     return t;
   }
-
-  function applyLexiconPrefs(s){
+  function applyLexiconPrefs(s) {
     const LEXICON_PREFS = [
-      { from:/\binterested\b/gi, to:'curious' },
-      { from:/\bvery\b/gi, to:'' },
-      { from:/\bsexy\b/gi, to:'bold' },
-      { from:/\bunwind\b/gi, to:'relax' },
-      { from:/\berrand(s)?\b/gi, to:'small chores' },
-      { from:/\bfavo(u?)rite(s)?\b/gi, to:'best thing' }
+      { from: /\binterested\b/gi, to: 'curious' },
+      { from: /\bvery\b/gi, to: '' },
+      { from: /\bsexy\b/gi, to: 'bold' },
+      { from: /\bunwind\b/gi, to: 'relax' },
+      { from: /\berrand(s)?\b/gi, to: 'small chores' },
+      { from: /\bfavo(u?)rite(s)?\b/gi, to: 'best thing' }
     ];
     let t = s;
     for (const r of LEXICON_PREFS) t = t.replace(r.from, r.to);
     return t;
   }
-  function normalizeSpaces(s){
-    let t=(s||'').replace(/\s+/g,' ');
-    t=t.replace(/\s+([,\.?])/g,'$1');
-    t=t.replace(/([,\.?])(?!\s|$)/g,'$1 ');
-    t=t.replace(/\s{2,}/g,' ');
+  function normalizeSpaces(s) {
+    let t = (s || '').replace(/\s+/g, ' ');
+    t = t.replace(/\s+([,\.?])/g, '$1');
+    t = t.replace(/([,\.?])(?!\s|$)/g, '$1 ');
+    t = t.replace(/\s{2,}/g, ' ');
     return t.trim();
   }
-  function capBoundaries(s){return s.replace(/(^|[.\s]\s+)([a-z])/g,(m,p1,p2)=>p1+p2.toUpperCase());}
-  function fixPronounI(s){
+  function capBoundaries(s) { return s.replace(/(^|[.\s]\s+)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase()); }
+  function fixPronounI(s) {
     return s
-      .replace(/\b(i)\b/g,'I')
-      .replace(/\bi'm\b/gi,"I'm")
-      .replace(/\bi've\b/gi,"I've")
-      .replace(/\bi'd\b/gi,"I'd")
-      .replace(/\bi'll\b/gi,"I'll");
+      .replace(/\b(i)\b/g, 'I')
+      .replace(/\bi'm\b/gi, "I'm")
+      .replace(/\bi've\b/gi, "I've")
+      .replace(/\bi'd\b/gi, "I'd")
+      .replace(/\bi'll\b/gi, "I'll");
   }
-  function ensureTerminalPunct(s){s=s.trim();return s?(/[\.?]$/.test(s)?s:(s+'.')):s;}
-  function enforceFeminineTone(s){
-    let t=s||'';
-    t=t.replace(/\bI'm\s+(?:a\s+)?(?:guy|man|male)\b/gi,"I'm a woman");
-    t=t.replace(/\bI\s+identify\s+as\s+(?:a\s+)?(?:man|male)\b/gi,"I identify as a woman");
-    t=t.replace(/\bI'm\s*(?:he\/him|he\/him\/his)\b/gi,"I'm she/her");
-    t=t.replace(/\bmy\s+pronouns\s*(?:are|:)\s*(?:he\/him|he\/him\/his)\b/gi,"my pronouns are she/her");
+  function ensureTerminalPunct(s) { s = s.trim(); return s ? (/[\.?]$/.test(s) ? s : (s + '.')) : s; }
+  function enforceFeminineTone(s) {
+    let t = s || '';
+    t = t.replace(/\bI'm\s+(?:a\s+)?(?:guy|man|male)\b/gi, "I'm a woman");
+    t = t.replace(/\bI\s+identify\s+as\s+(?:a\s+)?(?:man|male)\b/gi, "I identify as a woman");
+    t = t.replace(/\bI'm\s*(?:he\/him|he\/him\/his)\b/gi, "I'm she/her");
+    t = t.replace(/\bmy\s+pronouns\s*(?:are|:)\s*(?:he\/him|he\/him\/his)\b/gi, "my pronouns are she/her");
     return t;
   }
-
-  function postFormat(text){
-    if(!text) return text;
-
+  function postFormat(text) {
+    if (!text) return text;
     // IMPORTANT: kill image/meta + platform stamps FIRST so they never leak into outputs
     let t = stripStampsAll(text);
-
-    t=toAscii(t);
-    t=enforceFeminineTone(t);
-    t=stripDisallowedPunct(t);
-    t=smartPunct(t);
-    t=purgeBannedWords(t);
-    t=applyLexiconPrefs(t);
-    t=fixMissingApostrophes(t);
-    t=normalizeSpaces(t);
-    t=capBoundaries(t);
-    t=fixPronounI(t);
+    t = toAscii(t);
+    t = enforceFeminineTone(t);
+    t = stripDisallowedPunct(t);
+    t = smartPunct(t);
+    t = purgeBannedWords(t);
+    t = applyLexiconPrefs(t);
+    t = fixMissingApostrophes(t);
+    t = normalizeSpaces(t);
+    t = capBoundaries(t);
+    t = fixPronounI(t);
     if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === 'function') {
       t = LUXPatch.NoRepeat.scrub(t);
     }
-    t=ensureTerminalPunct(t);
+    t = ensureTerminalPunct(t);
     return clampToLimit(t);
   }
 
   // ===== Intent helpers =====
-  const wantsPics=(q)=>/\b(pics?|pictures?|photos?|selfie|images?|gallery|more\s+pictures?)\b/i.test((q||'').toLowerCase());
+  const wantsPics = (q) => /\b(pics?|pictures?|photos?|selfie|images?|gallery|more\s+pictures?)\b/i.test((q || '').toLowerCase());
+  const wantsJob = (q) => /\b(what\s+do\s+you\s+do|what\s+is\s+your\s+job|your\s+job|your\s+work|what\s+do\s+you\s+do\s+for\s+work|what\s+do\s+you\s+do\s+for\s+a\s+living|occupation|career|profession|are\s+you\s+working|do\s+you\s+work)\b/i.test((q || '').toLowerCase());
+
+  function ageBandHints(age) {
+    if (!Number.isFinite(age)) return "Pick a plausible everyday job that sounds realistic and not too specific.";
+    if (age <= 20) return "Age is very young. Use student or part time work only, for example college student, intern, retail, cafe, salon assistant.";
+    if (age <= 24) return "Use student, intern, entry level roles, for example student, intern, junior assistant, trainee, retail, hospitality, social media assistant.";
+    if (age <= 34) return "Use early career roles, for example account executive, nurse, teacher, admin, customer success, analyst, stylist, project assistant, small business owner.";
+    if (age <= 49) return "Use mid career roles, for example manager, consultant, senior specialist, business owner, HR, operations, sales manager, lecturer, nurse lead.";
+    if (age <= 64) return "Use senior roles, for example manager, director, consultant, small business owner, professor, administrator, clinic manager, realtor.";
+    return "Age is older. Use retired, semi retired, consultant, mentor, small business owner, volunteer coordinator, part time work.";
+  }
 
   // ===== LLM call (OpenRouter) with presets + booster + shim =====
   async function llmCall(messages, overrides = {}) {
@@ -1206,9 +1163,8 @@ async function lux_ensureAccess() {
     const key = lux_getApiKey().trim();
     const model = GM_getValue('lux_model', MODEL_DEFAULT).trim();
     if (!key) throw new Error('Missing OpenRouter API key');
-
     const base = getModelPreset(model);
-    const tuned = withCreativeBoost(base, (messages?.[messages.length-1]?.content)||'');
+    const tuned = withCreativeBoost(base, (messages?.[messages.length - 1]?.content) || '');
     let body = sanitizePayloadForModel({
       model,
       messages,
@@ -1234,24 +1190,24 @@ async function lux_ensureAccess() {
         data: JSON.stringify(body),
         timeout: REQUEST_TIMEOUT_MS,
         onload: (res) => {
-          try{
-            if(res.status<200||res.status>=300) {
-              return reject(new Error(`OpenRouter HTTP ${res.status}: ${trimText(res.responseText,280)}`));
+          try {
+            if (res.status < 200 || res.status >= 300) {
+              return reject(new Error(`OpenRouter HTTP ${res.status}: ${trimText(res.responseText, 280)}`));
             }
-            const data=JSON.parse(res.responseText||'{}');
-            const content=data?.choices?.[0]?.message?.content?.trim();
-            if(!content) return reject(new Error('Empty content from OpenRouter'));
+            const data = JSON.parse(res.responseText || '{}');
+            const content = data?.choices?.[0]?.message?.content?.trim();
+            if (!content) return reject(new Error('Empty content from OpenRouter'));
             resolve(content);
-          }catch(e){reject(e);}
+          } catch (e) { reject(e); }
         },
-        onerror:()=>reject(new Error('OpenRouter network error')),
-        ontimeout:()=>reject(new Error('OpenRouter timeout'))
+        onerror: () => reject(new Error('OpenRouter network error')),
+        ontimeout: () => reject(new Error('OpenRouter timeout'))
       });
     });
   }
 
   // ===== System prompt (model-aware, still with bans & safety) =====
-  function buildSystemPrompt(leftCard, customSystem, imageNotes){
+  function buildSystemPrompt(leftCard, customSystem, imageNotes) {
     const card = (personaCardLine(leftCard) || '');
     const modelName = (GM_getValue('lux_model', MODEL_DEFAULT) || '').trim().toLowerCase();
     const tc = buildTimeContext();
@@ -1278,7 +1234,7 @@ async function lux_ensureAccess() {
       "Banned language: do not use 'oh', 'oh wow', any form of 'flattered', any form of 'enthusiasm/enthusaism', 'sizzling', non-food 'spicy', or any 'flirt*' word.",
       "Form: one short paragraph, no emojis, about 70–150 words (the client enforces an 800-character cap).",
       `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-      "End with exactly one natural open-ended question that fits the flow of what you just said. It must not sound like a recycled template."
+      "End with exactly one natural open-ended question that fits the flow and matches the customer's tone. If they are flirty, make it playful. If they are serious, make it thoughtful. If they are upset, make it calming and clarifying. If they asked a direct question, ask a follow up that deepens it. Never use a generic or recycled question."
     ].join(" ");
 
     // Photo context is given ONLY here (so it doesn't show up as a stamp in the customer text)
@@ -1288,7 +1244,6 @@ async function lux_ensureAccess() {
 
     // Model-specific flavour layers
     let flavor = "";
-
     if (modelName.startsWith("x-ai/grok-4")) {
       flavor = [
         "Lean into a witty, quick, slightly teasing vibe without being rude.",
@@ -1327,25 +1282,23 @@ async function lux_ensureAccess() {
     }
 
     const core = baseCore + photoContext + " " + flavor;
-
     if (customSystem && customSystem.trim()) {
       return customSystem + " " + card;
     }
-
     return core + card;
   }
 
   // ===== History =====
-  let shortHistory=[];let lastSeen='';
-  function _threadKey(){try{const name=(parseLeftProfile().realName||'Lux');const path=(location.pathname||'/').slice(0,128);return`lux_thread_${name}__${path}`;}catch{return'lux_thread_Lux__/';}}
-  function _loadHistory(){
-    try{
-      const raw=GM_getValue(_threadKey(),'[]');
-      const arr=JSON.parse(raw);
-      if(Array.isArray(arr)) shortHistory = arr.slice(-HISTORY_MAX);
-    }catch{}
+  let shortHistory = []; let lastSeen = '';
+  function _threadKey() { try { const name = (parseLeftProfile().realName || 'Lux'); const path = (location.pathname || '/').slice(0, 128); return `lux_thread_${name}__${path}`; } catch { return 'lux_thread_Lux__/'; } }
+  function _loadHistory() {
+    try {
+      const raw = GM_getValue(_threadKey(), '[]');
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) shortHistory = arr.slice(-HISTORY_MAX);
+    } catch { }
   }
-  function _saveHistory(){try{GM_setValue(_threadKey(),JSON.stringify(shortHistory.slice(-HISTORY_MAX)));}catch{}}
+  function _saveHistory() { try { GM_setValue(_threadKey(), JSON.stringify(shortHistory.slice(-HISTORY_MAX))); } catch { } }
   _loadHistory();
 
   function lux_cleanHistoryMessage(msg) {
@@ -1360,7 +1313,6 @@ async function lux_ensureAccess() {
   function lux_cleanHistoryArray(history) {
     return (history || []).map(lux_cleanHistoryMessage);
   }
-
   function lux_buildHistoryByTokens(history, maxTokensForHistory) {
     const cleaned = lux_cleanHistoryArray(history || []);
     let total = 0;
@@ -1376,95 +1328,119 @@ async function lux_ensureAccess() {
   }
 
   // ===== UI render (hard clamp applied) =====
-  function showReplies(items){
-    ui.list.innerHTML='';
-    items.forEach(txt=>{
+  function showReplies(items) {
+    ui.list.innerHTML = '';
+    items.forEach(txt => {
       const finalTxt = clampToLimit(stripStampsAll(txt));
-      const d=document.createElement('div');
-      d.className='lux-reply';
-      d.textContent=finalTxt;
-      d.addEventListener('click',async()=>{
-        const ok=await pasteToSite(finalTxt);
-        if(ok) ui.popup.style.display='none';
+      const d = document.createElement('div');
+      d.className = 'lux-reply';
+      d.textContent = finalTxt;
+      d.addEventListener('click', async () => {
+        const ok = await pasteToSite(finalTxt);
+        if (ok) ui.popup.style.display = 'none';
       });
       ui.list.appendChild(d);
     });
   }
 
   // NEW: errors now go to overlay, not as chat replies
-  function errorReply(text){
+  function errorReply(text) {
     console.error('[LUX] error', text);
     lux_showErrorOverlay(String(text || 'Unknown error contacting OpenRouter.'));
   }
 
   // ===== Backend call (OpenRouter endpoint prefilled) =====
-  async function callBackend(msgText){
+  async function callBackend(msgText) {
     if (!lux_canSendRequest()) return;
-
-    const leftCard=parseLeftProfile();
+    const leftCard = parseLeftProfile();
 
     // preserve image meta internally, but strip platform/timestamp stamps
-    const rawWithMeta = stripStampsKeepMeta((msgText||'').toString());
-
+    const rawWithMeta = stripStampsKeepMeta((msgText || '').toString());
     // split out image notes so they never sit at the end of the customer message
     const split = extractLuxImageMeta(rawWithMeta);
     const rawMsg = stripStampsAll(split.text || '');   // clean customer text (NO meta, NO stamps)
     const imageNotes = (split.notes || '').trim();     // photo notes for SYSTEM prompt only
 
     window.__LUX_LAST_USER = rawMsg;
-
     const picAsk = wantsPics(rawMsg); // detection only
 
     // Routed intents (Safety)
-    if(Safety.askName(rawMsg)) {
-      const profName=(leftCard&&leftCard.realName)?leftCard.realName:'Luna';
-      const sys='Natural US English. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural, flow-matching open-ended question created by you.';
-      const user=`They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard)||''}\nCustomer: "${rawMsg.slice(0,240)}"`;
+    if (Safety.askName(rawMsg)) {
+      const profName = (leftCard && leftCard.realName) ? leftCard.realName : 'Luna';
+      const sys = 'Natural US English. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural open-ended question that matches the customer tone and what they just said.';
+      const user = `They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard) || ''}\nCustomer: "${rawMsg.slice(0, 240)}"`;
       const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
-      let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
+      let line = await llmCall([{ role: 'system', content: sys }, { role: 'user', content: user }], concise);
       line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
       line = postFormat(line);
-      showReplies([line]); pushHist(rawMsg,line); return;
+      showReplies([line]); pushHist(rawMsg, line); return;
     }
-    if(Safety.wantsLocation(rawMsg)) {
-      const profCity=(leftCard&&leftCard.location)?leftCard.location:'nearby';
-      const sys='If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural, flow-matching open-ended question created by you.';
-      const user=`City only: "${profCity}". ${personaCardLine(leftCard)||''}\nCustomer: "${rawMsg.slice(0,240)}"`;
+
+    if (Safety.wantsLocation(rawMsg)) {
+      const profCity = (leftCard && leftCard.location) ? leftCard.location : 'nearby';
+      const sys = 'If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid "oh/oh wow", "flattered*", "enthusiasm*", "sizzling", non-food "spicy", and "flirt*". End with one natural open-ended question that matches the customer tone and what they just said.';
+      const user = `City only: "${profCity}". ${personaCardLine(leftCard) || ''}\nCustomer: "${rawMsg.slice(0, 240)}"`;
       const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
-      let line=await llmCall([{role:'system',content:sys},{role:'user',content:user}], concise);
+      let line = await llmCall([{ role: 'system', content: sys }, { role: 'user', content: user }], concise);
       line = Safety.enforceNoMeetAccept ? await Safety.enforceNoMeetAccept(rawMsg, line, leftCard) : line;
       line = postFormat(line);
-      showReplies([line]); pushHist(rawMsg,line); return;
+      showReplies([line]); pushHist(rawMsg, line); return;
     }
-    if(Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
+
+    if (Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
       let out = await Safety.modelRefusal('meet', leftCard, rawMsg);
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       out = postFormat(out);
-      showReplies([out]); pushHist(rawMsg,out); return;
+      showReplies([out]); pushHist(rawMsg, out); return;
     }
-    if(Safety.wantsContact(rawMsg) || Safety.mentionsAddress(rawMsg)) {
-      let kind = Safety.mentionsAddress(rawMsg)?'address':'contact';
+
+    if (Safety.wantsContact(rawMsg) || Safety.mentionsAddress(rawMsg)) {
+      let kind = Safety.mentionsAddress(rawMsg) ? 'address' : 'contact';
       let out = await Safety.modelRefusal(kind, leftCard, rawMsg);
       out = postFormat(out);
-      showReplies([out]); pushHist(rawMsg,out); return;
+      showReplies([out]); pushHist(rawMsg, out); return;
+    }
+
+    // JOB / OCCUPATION (age-matched)
+    if (wantsJob(rawMsg)) {
+      const age = Number.isFinite(leftCard?.age) ? leftCard.age : null;
+      const tc = buildTimeContext();
+      const sys = [
+        "You are an adult woman on a dating site.",
+        "Answer their job question with a realistic job that fits the profile age, and sounds normal for that age.",
+        ageBandHints(age),
+        "Do not say you are an AI or mention rules.",
+        "Do not give company names, exact employer, or sensitive details.",
+        "One short paragraph.",
+        "Only use comma, period, question mark, and apostrophe. No other symbols.",
+        "Avoid: oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, flirt words.",
+        `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
+        (personaCardLine(leftCard) || ''),
+        "End with one open-ended question that matches the customer's tone and continues the topic naturally."
+      ].join(' ');
+      const user = `Customer asked about your job.\nCustomer: "${rawMsg.slice(0, 260)}"\nReturn only the reply.`;
+      const concise = { max_tokens: 110, temperature: 0.45, top_p: 0.92 };
+      let out = await llmCall([{ role: 'system', content: sys }, { role: 'user', content: user }], concise);
+      out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
+      out = postFormat(out);
+      showReplies([out]); pushHist(rawMsg, out); return;
     }
 
     // Normal path — OpenRouter direct
-    const system=buildSystemPrompt(leftCard,(GM_getValue('lux_persona','')||'').trim(), imageNotes);
+    const system = buildSystemPrompt(leftCard, (GM_getValue('lux_persona', '') || '').trim(), imageNotes);
     const chosenModel = GM_getValue('lux_model', MODEL_DEFAULT);
     const basePreset = getModelPreset(chosenModel);
     const tuned = withCreativeBoost(basePreset, rawMsg);
-
     const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
-    const messages=[{role:'system',content:system},...historyForModel,{role:'user',content:rawMsg}];
+    const messages = [{ role: 'system', content: system }, ...historyForModel, { role: 'user', content: rawMsg }];
 
-    const api=GM_getValue('lux_api_url',API_URL_DEFAULT).trim();
-    const headers={'Content-Type':'application/json'};
-    const key=lux_getApiKey().trim();
-    if(!key){ errorReply('Missing OpenRouter API key. Open LUX → Settings and paste your key.'); return; }
-    headers['Authorization']='Bearer '+key;
-    headers['HTTP-Referer']=location.origin;
-    headers['X-Title']=document.title||'LUX Userscript';
+    const api = GM_getValue('lux_api_url', API_URL_DEFAULT).trim();
+    const headers = { 'Content-Type': 'application/json' };
+    const key = lux_getApiKey().trim();
+    if (!key) { errorReply('Missing OpenRouter API key. Open LUX → Settings and paste your key.'); return; }
+    headers['Authorization'] = 'Bearer ' + key;
+    headers['HTTP-Referer'] = location.origin;
+    headers['X-Title'] = document.title || 'LUX Userscript';
 
     let payload = sanitizePayloadForModel({
       model: chosenModel,
@@ -1478,10 +1454,10 @@ async function lux_ensureAccess() {
     }, chosenModel);
 
     GM_xmlhttpRequest({
-      method:'POST', url:api, headers, data:JSON.stringify(payload), timeout:REQUEST_TIMEOUT_MS,
-      onload: async (res)=>{
-        try{
-          if(res.status<200||res.status>=300){
+      method: 'POST', url: api, headers, data: JSON.stringify(payload), timeout: REQUEST_TIMEOUT_MS,
+      onload: async (res) => {
+        try {
+          if (res.status < 200 || res.status >= 300) {
             let msg;
             if (res.status === 401) msg = 'OpenRouter API key is invalid or unauthorized.';
             else if (res.status === 402) msg = 'OpenRouter billing/quota exceeded (HTTP 402).';
@@ -1491,87 +1467,88 @@ async function lux_ensureAccess() {
             errorReply(msg);
             return;
           }
-          const data=JSON.parse(res.responseText||'{}');
-          const raw=(data?.choices?.[0]?.message?.content||'');
-          if(!raw){ errorReply('The server replied but no content was found.'); return; }
+          const data = JSON.parse(res.responseText || '{}');
+          const raw = (data?.choices?.[0]?.message?.content || '');
+          if (!raw) { errorReply('The server replied but no content was found.'); return; }
           let content = raw;
-
           content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
           content = postFormat(content);
-
           LUXPatch.UIChips.refresh({ modelLabel: chosenModel });
           showReplies([content]);
-          pushHist(rawMsg,content);
-        }catch(e){ errorReply('Parse error: '+String(e)); }
+          pushHist(rawMsg, content);
+        } catch (e) { errorReply('Parse error: ' + String(e)); }
       },
-      onerror:()=> errorReply('Network error talking to OpenRouter.'),
-      ontimeout:()=> errorReply('OpenRouter request timed out.')
+      onerror: () => errorReply('Network error talking to OpenRouter.'),
+      ontimeout: () => errorReply('OpenRouter request timed out.')
     });
   }
 
-  function pushHist(user,assistant){
-    shortHistory.push({role:'user',content:stripStampsAll(user)},{role:'assistant',content:postFormat(assistant)});
-    if(shortHistory.length>HISTORY_MAX) shortHistory.shift();
+  function pushHist(user, assistant) {
+    shortHistory.push({ role: 'user', content: stripStampsAll(user) }, { role: 'assistant', content: postFormat(assistant) });
+    if (shortHistory.length > HISTORY_MAX) shortHistory.shift();
     _saveHistory();
   }
 
   // ===== Paste plumbing =====
-  function siteInput(){
-    const el=document.querySelector(REPLY_INPUT_SELECTOR);
-    if(!el) return null;
-    const s=getComputedStyle(el);
-    const visible = s.display!=='none' && s.visibility!=='hidden' && el.offsetParent!==null;
+  function siteInput() {
+    const el = document.querySelector(REPLY_INPUT_SELECTOR);
+    if (!el) return null;
+    const s = getComputedStyle(el);
+    const visible = s.display !== 'none' && s.visibility !== 'hidden' && el.offsetParent !== null;
     const ro = el.hasAttribute('readonly') ? !el.readOnly : true;
-    const dis= el.hasAttribute('disabled') ? !el.disabled : true;
+    const dis = el.hasAttribute('disabled') ? !el.disabled : true;
     return (visible && ro && dis) ? el : null;
   }
-  function setNativeValue(el,value){
-    const desc=Object.getOwnPropertyDescriptor(el,'value');
-    const proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:el instanceof HTMLInputElement?HTMLInputElement.prototype:null;
-    if(desc&&desc.set){desc.set.call(el,value);}
-    else if(proto){const protoDesc=Object.getOwnPropertyDescriptor(proto,'value');protoDesc&&protoDesc.set&&protoDesc.set.call(el,value);}
+  function setNativeValue(el, value) {
+    const desc = Object.getOwnPropertyDescriptor(el, 'value');
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
+    if (desc && desc.set) { desc.set.call(el, value); }
+    else if (proto) { const protoDesc = Object.getOwnPropertyDescriptor(proto, 'value'); protoDesc && protoDesc.set && protoDesc.set.call(el, value); }
   }
-  function fireTypingEvents(el){
+  function fireTypingEvents(el) {
     const opts = { bubbles: true, cancelable: true };
-    try { el.dispatchEvent(new InputEvent('beforeinput', {bubbles:true,cancelable:true,inputType:'insertFromPaste',data:el.value})); } catch {}
+    try { el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: el.value })); } catch { }
     try { el.dispatchEvent(new FocusEvent('focus', opts)); } catch { el.dispatchEvent(new Event('focus', opts)); }
-    try { el.dispatchEvent(new InputEvent('input', {bubbles:true,cancelable:true,inputType:'insertFromPaste',data:el.value})); } catch { el.dispatchEvent(new Event('input', opts)); }
+    try { el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: el.value })); } catch { el.dispatchEvent(new Event('input', opts)); }
     el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
     el.dispatchEvent(new KeyboardEvent('keypress', { key: ' ', code: 'Space', bubbles: true }));
     el.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true }));
     el.dispatchEvent(new Event('change', opts));
   }
-  async function pasteToSite(text){
-    const el=siteInput();
-    if(!el){ notify('Reply box not found. Update selector.'); return false; }
+  async function pasteToSite(text) {
+    const el = siteInput();
+    if (!el) { notify('Reply box not found. Update selector.'); return false; }
     el.scrollIntoView({ block: 'nearest' }); el.click(); el.focus();
     const final = clampToLimit(stripStampsAll(text));
     setNativeValue(el, final);
-    try { el.selectionStart = el.selectionEnd = el.value.length; } catch {}
+    try { el.selectionStart = el.selectionEnd = el.value.length; } catch { }
     fireTypingEvents(el);
-    if (typeof queueMicrotask === 'function') queueMicrotask(()=> fireTypingEvents(el)); else setTimeout(()=> fireTypingEvents(el), 0);
+    if (typeof queueMicrotask === 'function') queueMicrotask(() => fireTypingEvents(el)); else setTimeout(() => fireTypingEvents(el), 0);
     return true;
   }
 
   // ===== Events =====
-  btn.addEventListener('click',()=>{
-    ui.popup.style.display='block';
+  btn.addEventListener('click', () => {
+    ui.popup.style.display = 'block';
     ui.customer.focus();
-    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
+    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || 'default') });
   });
-  ui.close.addEventListener('click',()=>{
+
+  ui.close.addEventListener('click', () => {
     if (LUXSettingsDirty) {
       if (confirm('You changed LUX settings. Save before closing?')) {
         ui.save.click();
       }
       LUXSettingsDirty = false;
     }
-    ui.popup.style.display='none';
+    ui.popup.style.display = 'none';
   });
-  ui.settings.addEventListener('click',()=>{
-    ui.panel.style.display = ui.panel.style.display==='none'?'block':'none';
+
+  ui.settings.addEventListener('click', () => {
+    ui.panel.style.display = ui.panel.style.display === 'none' ? 'block' : 'none';
   });
-  ui.save.addEventListener('click',()=>{
+
+  ui.save.addEventListener('click', () => {
     GM_setValue('lux_api_url', ui.apiUrl.value.trim());
     lux_setApiKey(ui.apiKey.value.trim());
     GM_setValue('lux_model', ui.model.value.trim());
@@ -1579,23 +1556,23 @@ async function lux_ensureAccess() {
     GM_setValue('lux_persona', ui.persona.value.trim());
     GM_setValue('lux_excuse_via_model', ui.excuseViaModel && ui.excuseViaModel.checked ? 1 : 0);
     GM_setValue('lux_filter_enabled', ui.filterEnabled && ui.filterEnabled.checked ? 1 : 0);
-    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
+    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || 'default') });
     LUXSettingsDirty = false;
     alert('Saved');
   });
 
-  ui.apiUrl.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
-  ui.apiKey.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
-  ui.model.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
-  ui.provider.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
-  ui.persona.addEventListener('input', ()=>{ LUXSettingsDirty = true; });
-  ui.excuseViaModel.addEventListener('change', ()=>{ LUXSettingsDirty = true; });
-  ui.filterEnabled.addEventListener('change', ()=>{ LUXSettingsDirty = true; });
+  ui.apiUrl.addEventListener('input', () => { LUXSettingsDirty = true; });
+  ui.apiKey.addEventListener('input', () => { LUXSettingsDirty = true; });
+  ui.model.addEventListener('input', () => { LUXSettingsDirty = true; });
+  ui.provider.addEventListener('input', () => { LUXSettingsDirty = true; });
+  ui.persona.addEventListener('input', () => { LUXSettingsDirty = true; });
+  ui.excuseViaModel.addEventListener('change', () => { LUXSettingsDirty = true; });
+  ui.filterEnabled.addEventListener('change', () => { LUXSettingsDirty = true; });
 
   // Manual Send
-  ui.send.addEventListener('click', async ()=>{
-    const msg = stripStampsAll((ui.customer.value||'').trim());
-    if(!msg){ notify('Type a message first.'); return; }
+  ui.send.addEventListener('click', async () => {
+    const msg = stripStampsAll((ui.customer.value || '').trim());
+    if (!msg) { notify('Type a message first.'); return; }
     await callBackend(msg);
   });
 
@@ -1623,59 +1600,53 @@ async function lux_ensureAccess() {
   /* ===========================
      MutationObserver-based watcher
      (with polling fallback)
-     =========================== */
-  function processLatestTurn(){
-    const root=document.querySelector(THREAD_SEL);
-    if(!root) return;
-    const nodes=[...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
-    const turns=[];
-    for(const row of nodes){
-      const fromClient=row.matches(CLIENT_MSG_SELECTOR);
-      const content=extractMessageContent(row);
-      if(content) turns.push({role: fromClient?'user':'assistant', content: stripStampsKeepMeta(content)});
+     ============================ */
+  function processLatestTurn() {
+    const root = document.querySelector(THREAD_SEL);
+    if (!root) return;
+    const nodes = [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
+    const turns = [];
+    for (const row of nodes) {
+      const fromClient = row.matches(CLIENT_MSG_SELECTOR);
+      const content = extractMessageContent(row);
+      if (content) turns.push({ role: fromClient ? 'user' : 'assistant', content: stripStampsKeepMeta(content) });
     }
-    const lastUser = turns.slice().reverse().find(t=>t.role==='user');
-    if(!lastUser) return;
-
+    const lastUser = turns.slice().reverse().find(t => t.role === 'user');
+    if (!lastUser) return;
     // display clean text only (no stamps, no meta)
     const split = extractLuxImageMeta(lastUser.content || '');
     const cleanForUI = stripStampsAll(split.text || '');
-
-    if(!cleanForUI || cleanForUI===lastSeen) return;
-    lastSeen=cleanForUI;
-
+    if (!cleanForUI || cleanForUI === lastSeen) return;
+    lastSeen = cleanForUI;
     // store cleaned history (meta removed at save-time)
-    if(turns.length){
-      shortHistory = turns.slice(-HISTORY_MAX).map(t => ({ role: t.role, content: stripStampsAll(extractLuxImageMeta(t.content||'').text || '') }));
+    if (turns.length) {
+      shortHistory = turns.slice(-HISTORY_MAX).map(t => ({ role: t.role, content: stripStampsAll(extractLuxImageMeta(t.content || '').text || '') }));
       _saveHistory();
     }
-
-    ui.customer.value=cleanForUI;
-    ui.popup.style.display='block';
+    ui.customer.value = cleanForUI;
+    ui.popup.style.display = 'block';
     ui.customer.focus();
-    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value||'default') });
-
+    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || 'default') });
     // call backend using the raw DOM-captured content (still includes meta internally)
     callBackend(lastUser.content);
   }
 
-  function setupThreadWatcher(){
-    const root=document.querySelector(THREAD_SEL);
-    if(!root) return false;
-    const obs = new MutationObserver(()=>{ processLatestTurn(); });
-    obs.observe(root,{childList:true,subtree:true});
+  function setupThreadWatcher() {
+    const root = document.querySelector(THREAD_SEL);
+    if (!root) return false;
+    const obs = new MutationObserver(() => { processLatestTurn(); });
+    obs.observe(root, { childList: true, subtree: true });
     // run once to catch the current last message
     processLatestTurn();
     return true;
   }
 
   // Try to attach observer; fall back to polling until thread exists
-  if(!setupThreadWatcher()){
-    const fallbackId = setInterval(()=>{
-      if(setupThreadWatcher()){
+  if (!setupThreadWatcher()) {
+    const fallbackId = setInterval(() => {
+      if (setupThreadWatcher()) {
         clearInterval(fallbackId);
       }
     }, POLL_MS);
   }
-
 })();
