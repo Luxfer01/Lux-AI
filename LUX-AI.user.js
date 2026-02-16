@@ -323,9 +323,17 @@ async function lux_ensureAccess() {
       max_tokens: 230,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
       seed: 19
+    },
+    // 6) DeepSeek Chat – balanced, natural
+    'deepseek/deepseek-chat': {
+      temperature: 0.60,
+      top_p: 0.92,
+      repetition_penalty: 1.03,
+      max_tokens: 240,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 23
     }
-  };
-
+  }
   function getModelPreset(modelName) {
     const name = (modelName || GM_getValue('lux_model', MODEL_DEFAULT) || '').trim();
     return MODEL_PRESETS[name] || MODEL_FALLBACK_PRESET;
@@ -722,12 +730,13 @@ async function lux_ensureAccess() {
 
   // ===== Models picker =====
   const modelChoices = [
-    'x-ai/grok-4-fast', // default
-    'anthropic/claude-3.5-sonnet',
-    'openai/gpt-4.1-mini',
-    'meta-llama/llama-3.3-8b-instruct:free',
-    'meta-llama/llama-3.3-70b-instruct:free',
-  ];
+  'x-ai/grok-4-fast',
+  'anthropic/claude-3.5-sonnet',
+  'openai/gpt-4.1-mini',
+  'meta-llama/llama-3.3-8b-instruct:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'deepseek/deepseek-chat',
+];
 
   let LUXSettingsDirty = false;
 
@@ -1650,3 +1659,4 @@ async function lux_ensureAccess() {
     }, POLL_MS);
   }
 })();
+s
