@@ -331,17 +331,39 @@ async function lux_ensureAccess() {
     return { tone, engagement };
   }
 
-  function lux_questionGuide(tone, engagement) {
-    const base = 'End with exactly one open ended question that fits the flow and does not sound templated.';
-    if (tone === 'angry') return base + ' Their tone is tense, be calm and de escalating, ask a soft clarifying question about what bothered them.';
-    if (tone === 'cold') return base + ' Their tone is dry, use a light hook and ask a simple two choice style question to make replying easy.';
-    if (tone === 'serious') return base + ' Their tone is serious, ask a thoughtful question that invites specifics and shows you listened.';
-    if (tone === 'sweet') return base + ' Their tone is affectionate, ask a gentle feeling based question that deepens the moment.';
-    if (tone === 'flirty') return base + ' Their tone is teasing, ask a playful chemistry question that stays on platform and avoids meetups.';
-    if (tone === 'playful') return base + ' Their tone is playful, ask a fun imaginative question that feels spontaneous.';
-    if (engagement === 'low') return base + ' Keep the question very easy to answer and not long.';
-    return base;
+function lux_questionGuide(tone, engagement) {
+  const base = [
+    'End with exactly one open ended question that fits the flow and does not sound templated.',
+    'The question must feel interesting, engaging, and easy to reply to.',
+    'Avoid dull questions like how was your day, what are you up to, tell me about yourself, or what do you like to do.',
+    'Prefer curiosity, imagination, chemistry, contrast, opinions, little confessions, preferences, memories, or playful what if questions.',
+    'The question should make the person want to answer, not feel interviewed.'
+  ].join(' ');
+
+  if (tone === 'angry') {
+    return base + ' Their tone is tense, be calm and de escalating, ask a soft question that helps them explain what really bothered them.';
   }
+  if (tone === 'cold') {
+    return base + ' Their tone is dry, use a light hook and ask something easy but still interesting, like a preference, mood, or little choice question that feels personal.';
+  }
+  if (tone === 'serious') {
+    return base + ' Their tone is serious, ask something thoughtful that invites specifics, perspective, or a real opinion, not a flat generic question.';
+  }
+  if (tone === 'sweet') {
+    return base + ' Their tone is affectionate, ask a warm feeling based question that deepens closeness, like what they miss, what softens them, or what kind of affection gets to them.';
+  }
+  if (tone === 'flirty') {
+    return base + ' Their tone is teasing, ask a playful chemistry question that builds tension on platform, like what about a woman catches their attention first, what kind of teasing they enjoy, or what kind of kiss would ruin their focus.';
+  }
+  if (tone === 'playful') {
+    return base + ' Their tone is playful, ask something imaginative, cheeky, or unexpected that sparks banter and makes replying fun.';
+  }
+  if (engagement === 'low') {
+    return base + ' Keep the question easy to answer, but still interesting, like a choice between two tempting options or a small revealing preference.';
+  }
+
+  return base + ' Make the question vivid, specific, and a little magnetic.';
+}
 
   function lux_toneKey() { try { return _threadKey() + '__tone_v1'; } catch { return 'lux_tone_global_v1'; } }
   function lux_getToneMemory() {
