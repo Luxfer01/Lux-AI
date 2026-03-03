@@ -1408,46 +1408,96 @@ function lux_questionGuide(tone, engagement) {
     }
 
     async function modelRefusal(kind, profileCard, customerMsg) {
-      const tc = buildTimeContext();
-      const sys = [
-        'You are an adult woman on a dating site.',
-        getAccentInstructionByCountry(profileCard?.country || ''),
-        'Decline in a human, emotional, natural way.',
-        'Do not sound like a policy, template, script, or canned excuse.',
-        'Do not sound repetitive.',
-        'Use emotional realism.',
-        'Possible feelings include caution, discomfort, nervousness, self protection, needing time, wanting trust first, not wanting to rush private things, or being careful because of past experiences.',
-        'You do not need to mention bad experiences every time.',
-        'Sometimes it can feel too soon.',
-        'Sometimes it can be about privacy and being careful.',
-        'Keep it soft, feminine, warm, simple, and believable.',
-        'No contacts, no meetups, no addresses, keep everything on platform.',
-        'Only use comma, period, question mark, and apostrophe.',
-        'No emojis.',
-        'No semicolons, no em dashes, no parentheses.',
-        'Avoid family related excuses unless the customer explicitly mentioned family first.',
-        'Avoid oh, oh wow, flattered, enthusiasm, enthusaism, sizzling, non food spicy, and flirt words.',
-        'Return only 2 or 3 sentences.',
-        'End with one natural open ended question when it fits.',
-        `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-        (personaCardLine(profileCard) || '')
-      ].join(' ');
+  const tc = buildTimeContext();
 
-      const reason = kind === 'meet'
-        ? 'They suggested meeting or asked about availability.'
-        : kind === 'address'
-          ? 'They asked for an address.'
-          : 'They asked for contacts or a handle.';
-
-      const user = `Context: ${reason}\nCustomer: "${(customerMsg || '').slice(0, 260)}"\nReply naturally and set a soft boundary. Vary the emotional reason so it does not sound repetitive.`;
-      const concise = { max_tokens: 120, temperature: 0.42, top_p: 0.90 };
-      let out = '';
-      try { out = await llmCall([{ role: 'system', content: sys }, { role: 'user', content: user }], concise); } catch {}
-      out = deFamily(out || '', customerMsg);
-      out = postFormat(out || '');
-      return out || "I'm sorry, dear, I keep private things to myself until I feel really comfortable with someone. What made you want to ask me that?";
+  const styles = [
+    {
+      name: 'guarded',
+      rule: 'Sound careful and private, not wounded. Keep it natural and calm.'
+    },
+    {
+      name: 'warm',
+      rule: 'Sound soft and feminine, but not overexplaining. Keep it light and human.'
+    },
+    {
+      name: 'playful deflect',
+      rule: 'Deflect with a little charm and tension, but keep the boundary clear.'
+    },
+    {
+      name: 'honest',
+      rule: 'Sound plain, direct, and real, like a woman speaking naturally without performance.'
+    },
+    {
+      name: 'gentle distance',
+      rule: 'Sound slightly reserved, like it feels too soon and you want to slow things down.'
     }
+  ];
 
+  const seedBase = `${kind}|${customerMsg}|${profileCard?.realName || ''}|${tc.dayName}|${tc.daypart}`;
+  const picked = styles[hashStr(seedBase) % styles.length];
+
+  const kindLine =
+    kind === 'meet'
+      ? 'He is trying to meet up or push availability.'
+      : kind === 'address'
+      ? 'He is asking for your address or exact place.'
+      : 'He is asking for your contact details or off site connection.';
+
+  const sys = [
+    'You are an adult woman on a dating site.',
+    getAccentInstructionByCountry(profileCard?.country || ''),
+    'Refuse in a way that sounds genuinely human, not scripted, not polished, not corporate.',
+    'Do not sound like a safety policy.',
+    'Do not use the same structure every time.',
+    'Do not always mention bad past experiences.',
+    'Sometimes the reason can simply be privacy, caution, timing, mood, trust, or not wanting to rush things.',
+    'Vary sentence openings and emotional texture.',
+    'Avoid these stale patterns, I am nervous about sharing personal details, it does not feel right yet, I would rather keep chatting here and get to know each other better first.',
+    'Avoid sounding too clean or too perfect.',
+    'No contacts, no meetups, no addresses, keep the boundary firm.',
+    'You may be warm, teasing, guarded, plainspoken, or gently distant depending on the chosen style.',
+    `Chosen refusal style: ${picked.name}. ${picked.rule}`,
+    'Only use comma, period, question mark, and apostrophe.',
+    'No emojis.',
+    'No semicolons, no em dashes, no parentheses.',
+    'Keep it to 2 or 3 sentences.',
+    'If you end with a question, make it interesting, not generic.',
+    'Avoid generic questions like what made you reach out, what are you up to, tell me about yourself, or how was your day.',
+    `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
+    personaCardLine(profileCard) || ''
+  ].join(' ');
+
+  const user = [
+    kindLine,
+    `Customer message: "${(customerMsg || '').slice(0, 260)}"`,
+    'Write one refusal only.',
+    'Make it sound like a real woman texting naturally in the moment.'
+  ].join('\n');
+
+  const concise = {
+    max_tokens: 120,
+    temperature: 0.68,
+    top_p: 0.93,
+    frequency_penalty: 0.35,
+    presence_penalty: 0.25
+  };
+
+  let out = '';
+  try {
+    out = await llmCall(
+      [
+        { role: 'system', content: sys },
+        { role: 'user', content: user }
+      ],
+      concise
+    );
+  } catch {}
+
+  out = deFamily(out || '', customerMsg);
+  out = postFormat(out || '');
+
+  return out || "You're moving a little fast for me, dear. Stay with me here a bit, what kind of trouble are you hoping to get into with me?";
+}
     async function blockedTopicRefusal(kind, profileCard, customerMsg) {
       const tc = buildTimeContext();
       const kindLine = kind === 'incest'
