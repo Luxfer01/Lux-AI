@@ -1,9 +1,3 @@
-/* =========================
-   LUX FULL SCRIPT (UPDATED)
-   Part 1 of 4
-   Copy Part 1 → Part 4 in order into ONE userscript file.
-   ========================= */
-
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
