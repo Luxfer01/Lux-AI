@@ -1,8 +1,14 @@
+/* =========================
+   LUX FULL SCRIPT (UPDATED)
+   Part 1 of 4
+   Copy Part 1 → Part 4 in order into ONE userscript file.
+   ========================= */
+
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.3.1
-// @description  Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, stronger emotional refusals, blocked taboo content, topbar chips, no contacts/meetups, 800-char cap, one natural open-ended question, plus smarter greeting handling, resilient empty-content retry, and clickable member-note fact chips.
+// @version      14.3.0
+// @description  Refactored LUX: encrypted OpenRouter key, strict Apps Script access (no offline grace), adaptive history, persistent creative booster, stronger emotional refusals, blocked taboo content, topbar chips, no contacts/meetups, 800-char cap, one natural open-ended question, plus stronger member-note drafting + clickable apply, and country-based writing accent.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -340,13 +346,28 @@ async function lux_ensureAccess() {
       'The question should make the person want to answer, not feel interviewed.'
     ].join(' ');
 
-    if (tone === 'angry') return base + ' Their tone is tense, be calm and de escalating, ask a soft question that helps them explain what really bothered them.';
-    if (tone === 'cold') return base + ' Their tone is dry, use a light hook and ask something easy but still interesting, like a preference, mood, or little choice question that feels personal.';
-    if (tone === 'serious') return base + ' Their tone is serious, ask something thoughtful that invites specifics, perspective, or a real opinion, not a flat generic question.';
-    if (tone === 'sweet') return base + ' Their tone is affectionate, ask a warm feeling based question that deepens closeness, like what they miss, what softens them, or what kind of affection gets to them.';
-    if (tone === 'flirty') return base + ' Their tone is teasing, ask a playful chemistry question that builds tension on platform, like what about a woman catches their attention first, what kind of teasing they enjoy, or what kind of kiss would ruin their focus.';
-    if (tone === 'playful') return base + ' Their tone is playful, ask something imaginative, cheeky, or unexpected that sparks banter and makes replying fun.';
-    if (engagement === 'low') return base + ' Keep the question easy to answer, but still interesting, like a choice between two tempting options or a small revealing preference.';
+    if (tone === 'angry') {
+      return base + ' Their tone is tense, be calm and de escalating, ask a soft question that helps them explain what really bothered them.';
+    }
+    if (tone === 'cold') {
+      return base + ' Their tone is dry, use a light hook and ask something easy but still interesting, like a preference, mood, or little choice question that feels personal.';
+    }
+    if (tone === 'serious') {
+      return base + ' Their tone is serious, ask something thoughtful that invites specifics, perspective, or a real opinion, not a flat generic question.';
+    }
+    if (tone === 'sweet') {
+      return base + ' Their tone is affectionate, ask a warm feeling based question that deepens closeness, like what they miss, what softens them, or what kind of affection gets to them.';
+    }
+    if (tone === 'flirty') {
+      return base + ' Their tone is teasing, ask a playful chemistry question that builds tension on platform, like what about a woman catches their attention first, what kind of teasing they enjoy, or what kind of kiss would ruin their focus.';
+    }
+    if (tone === 'playful') {
+      return base + ' Their tone is playful, ask something imaginative, cheeky, or unexpected that sparks banter and makes replying fun.';
+    }
+    if (engagement === 'low') {
+      return base + ' Keep the question easy to answer, but still interesting, like a choice between two tempting options or a small revealing preference.';
+    }
+
     return base + ' Make the question vivid, specific, and a little magnetic.';
   }
 
@@ -461,7 +482,6 @@ async function lux_ensureAccess() {
 
   function _qs(r, s) { try { return s ? r.querySelector(s) : null; } catch { return null; } }
   function _qst(r, s) { const el = _qs(r, s); return el ? el.innerText.trim() : ''; }
-
   function extractBracketName(s) {
     if (!s) return '';
     let m = s.match(/\(([^()]*)\)\s*$/);
@@ -787,15 +807,22 @@ async function lux_ensureAccess() {
     return dedupeCsvItems(out);
   }
 
+  // UPDATED: allow lowercase inputs like "i'm mike" and title-case them later
   function looksLikeNameCandidate(v) {
     const s = normalizeLooseText(v);
     if (!s) return false;
-    if (!/^[A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?$/.test(s)) return false;
+    if (!/^[A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?$/.test(s)) return false;
     if (/^(Single|Married|Divorced|Widowed|Separated|Here|Ready|Busy|Fine|Okay|Ok|Tired|Captain)$/i.test(s)) return false;
     if (/^(Baby|Babe|Dear|Darling|Love|Honey|Sweetheart)$/i.test(s)) return false;
+    if (/^(good|okay|ok|fine|great|cool|here)$/i.test(s)) return false;
     return true;
   }
 
+  function lux_titleCaseName(n) {
+    const parts = normalizeLooseText(n).split(/\s+/).filter(Boolean);
+    return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(' ');
+  }
+  // UPDATED: stronger name capture, including "I'm Mike" and "im Mike" and "i am Mike"
   function parseClientFactsFromLatestMessage(messageText) {
     const raw = normalizeLooseText(stripStampsAll(messageText || ''));
     if (!raw) return null;
@@ -803,16 +830,29 @@ async function lux_ensureAccess() {
     const lower = text.toLowerCase();
     const facts = {};
 
+    // --- Name (UPDATED) ---
+    // 1) high-confidence explicit patterns
+    // 2) supports: "I'm Mike", "im Mike", "I am Mike", "my name is Mike", "call me Mike", "this is Mike"
+    // 3) supports: "hey, I'm Mike." inside longer sentences
+    // 4) title-cases the result
     const name = extractFirst(text, [
-      /\bmy\s+name\s+is\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
-      /\bi(?:'m|\s+am)\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
-      /\bthis\s+is\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
-      /\bcall\s+me\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
-      /\byou\s+can\s+call\s+me\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
-      /\b([A-Z][a-z'\-]{1,30})\s+here\b/i
+      /\bmy\s+name\s+is\s+([A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?)\b/i,
+      /\byou\s+can\s+call\s+me\s+([A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?)\b/i,
+      /\bcall\s+me\s+([A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?)\b/i,
+      /\bthis\s+is\s+([A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?)\b/i,
+      // "I'm Mike" / "im Mike"
+      /\b(?:i'?m|im)\s+([A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?)\b/i,
+      // "I am Mike"
+      /\bi\s+am\s+([A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?)\b/i,
+      // "Mike here"
+      /\b([A-Za-z][A-Za-z'\-]{1,30})\s+here\b/i
     ], cleanupNoteValue);
-    if (name && looksLikeNameCandidate(name)) facts.Name = name;
 
+    if (name && looksLikeNameCandidate(name)) {
+      facts.Name = lux_titleCaseName(name);
+    }
+
+    // --- Age ---
     const age = extractFirst(text, [
       /\bi(?:'m|\s+am)\s+(\d{1,3})\b/i,
       /\bmy\s+age\s+is\s+(\d{1,3})\b/i,
@@ -824,6 +864,7 @@ async function lux_ensureAccess() {
     });
     if (age) facts.Age = age;
 
+    // --- Location / Address ---
     const location = extractFirst(text, [
       /\bi\s+live\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})\b/i,
       /\bi\s+am\s+from\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})\b/i,
@@ -837,6 +878,7 @@ async function lux_ensureAccess() {
       else facts.Location = location;
     }
 
+    // --- Job / Work (UPDATED: keep the "thing they did", not just years) ---
     const job = extractFirst(text, [
       /\bi\s+work\s+as\s+(?:an?\s+)?([^\.,!?]{2,80})/i,
       /\bi\s+am\s+(?:an?\s+)?([^\.,!?]{2,80})\s+by\s+profession/i,
@@ -844,27 +886,47 @@ async function lux_ensureAccess() {
       /\bi\s+work\s+in\s+([^\.,!?]{2,80})/i,
       /\bi\s+work\s+for\s+([^\.,!?]{2,80})/i,
       /\bi\s+served\s+as\s+(?:a\s+|an\s+)?([^\.,!?]{2,80})/i,
-      /\bi\s+am\s+retired\s+from\s+([^\.,!?]{2,80})/i
-    ], cleanupNoteValue);
-    if (job && !/^(here|there|single|married|busy|ready|okay|ok|fine)$/i.test(job)) facts.Job = job;
+      /\bi\s+am\s+retired\s+from\s+([^\.,!?]{2,80})/i,
+      // extra: "I was in the army"
+      /\bi\s+was\s+in\s+(the\s+)?([A-Za-z][A-Za-z\s]{2,60})/i
+    ], (v) => {
+      let t = cleanupNoteValue(v);
+      t = t.replace(/^(the\s+)/i, '');
+      return normalizeLooseText(t);
+    });
 
+    if (job) {
+      // If matched "I was in the army" where group 2 is used, normalize cleaner will still give good text.
+      if (!/^(here|there|single|married|busy|ready|okay|ok|fine)$/i.test(job)) facts.Job = job;
+    }
+
+    // workplace
     const workplace = extractFirst(text, [
+      /\bi'?ve\s+been\s+(?:a\s+|an\s+)?[^\.,!?]{2,50}\s+with\s+([^\.,!?]{2,80})/i,
+      /\bi'?m\s+(?:a\s+|an\s+)?[^\.,!?]{2,50}\s+with\s+([^\.,!?]{2,80})/i,
+      /\bi\s+am\s+(?:a\s+|an\s+)?[^\.,!?]{2,50}\s+with\s+([^\.,!?]{2,80})/i,
       /\bi\s+work\s+for\s+([^\.,!?]{2,80})/i,
       /\bi'?ve\s+worked\s+for\s+([^\.,!?]{2,80})/i,
       /\bi'?ve\s+been\s+with\s+([^\.,!?]{2,80})/i,
       /\bi\s+am\s+with\s+([^\.,!?]{2,80})/i,
-      /\bi'?m\s+with\s+([^\.,!?]{2,80})/i
+      /\bi'?m\s+with\s+([^\.,!?]{2,80})/i,
+      /\bi\s+work\s+with\s+([^\.,!?]{2,80})/i,
+      /\bi\s+am\s+retired\s+from\s+([^\.,!?]{2,80})/i
     ], cleanupNoteValue);
     if (workplace) facts.Workplace = workplace;
 
+    // experience (keep just the duration text, but now it's paired with Job above)
     const experience = extractFirst(text, [
       /\bfor\s+(\d+\s+years?)\b/i,
       /\bover\s+(\d+\s+years?)\b/i,
       /\babout\s+(\d+\s+years?)\b/i,
-      /\b(\d+\s+years?)\s+now\b/i
+      /\b(\d+\s+years?)\s+now\b/i,
+      /\bworked\s+(?:there\s+)?for\s+(\d+\s+years?)\b/i,
+      /\bwith\s+[^\.,!?]{2,80}\s+for\s+(\d+\s+years?)\b/i
     ], cleanupNoteValue);
     if (experience) facts.Experience = experience;
 
+    // status
     const status = extractFirst(text, [
       /\bi(?:'m|\s+am)\s+(single|divorced|widowed|separated|married)\b/i,
       /\bI'm\s+a\s+(single\s+(?:dad|mom|father|mother))\b/i,
@@ -872,13 +934,16 @@ async function lux_ensureAccess() {
     ], cleanupNoteValue);
     if (status) facts.Status = status;
 
+    // family
     const family = extractFirst(text, [
+      /\bi\s+have\s+([^\.,!?]{2,80})\s+(?:kids|children|sons|daughters)\b/i,
       /\bi\s+have\s+(\d+\s+(?:kids|children|sons|daughters))\b/i,
       /\bi'?m\s+a\s+(single\s+(?:dad|mom|father|mother))\b/i,
       /\bmy\s+(?:son|daughter|kids|children|mom|mother|dad|father|parents?)\b[^\.!?]{0,60}/i
     ], cleanupNoteValue);
     if (family) facts.Family = family;
 
+    // hobbies
     const hobbies = extractMany(text, [
       /\bi\s+like\s+([^\.!?]{2,90})/i,
       /\bi\s+love\s+([^\.!?]{2,90})/i,
@@ -888,21 +953,27 @@ async function lux_ensureAccess() {
     ]).filter(x => !/^(you|this|that|it|here|there)$/i.test(x));
     if (hobbies.length) facts.Hobbies = hobbies.join(', ');
 
+    // activities
     const activities = extractMany(text, [
+      /\bi\s+(?:usually|often|normally)\s+([^\.!?]{2,90})/i,
       /\bright\s+now\s+i'?m\s+([^\.!?]{2,90})/i,
       /\bi'?m\s+currently\s+([^\.!?]{2,90})/i,
       /\bi\s+spend\s+my\s+time\s+([^\.!?]{2,90})/i
     ]);
     if (activities.length) facts.Activity = activities.join(', ');
 
+    // schedule
     const schedule = extractFirst(text, [
       /\bi\s+work\s+(nights|days|weekends|night shifts|day shifts)\b/i,
       /\bi\s+have\s+(?:an\s+)?appointment\s+([^\.!?]{2,80})/i,
+      /\bi\s+am\s+free\s+([^\.!?]{2,80})/i,
+      /\bi\s+usually\s+work\s+([^\.!?]{2,80})/i,
       /\btomorrow\s+i\s+([^\.!?]{2,80})/i,
       /\bthis\s+(?:week|weekend|evening|morning)\s+i\s+([^\.!?]{2,80})/i
     ], cleanupNoteValue);
     if (schedule) facts.Schedule = schedule;
 
+    // contact
     const contact = extractFirst(text, [
       /\bmy\s+(?:number|phone\s+number)\s+is\s+([+\d\s\-()]{6,30})\b/i,
       /\breach\s+me\s+at\s+([+\d\s\-()]{6,30})\b/i,
@@ -913,9 +984,11 @@ async function lux_ensureAccess() {
 
     if (/\bwhatsapp|telegram|snap(?:chat)?|instagram|ig\b/i.test(lower) && !facts.Contact) facts.ContactAttempt = 'asked to move chat off site';
 
+    // plans
     const plan = extractFirst(text, [
       /\bi\s+plan\s+to\s+([^\.!?]{2,80})/i,
       /\bi'?m\s+going\s+to\s+([^\.!?]{2,80})/i,
+      /\bi\s+want\s+to\s+([^\.!?]{2,80})/i,
       /\bnext\s+week\s+i\s+([^\.!?]{2,80})/i
     ], cleanupNoteValue);
     if (plan) facts.Plans = plan;
@@ -1038,24 +1111,132 @@ async function lux_ensureAccess() {
     return true;
   }
 
-  async function applyFactsToMemberNote(facts) {
+  /* =========================
+     NEW: LOGNOTE UI (Right textarea apply)
+     - shows extracted fields as clickable chips
+     - Apply All works
+     - writes into the RIGHT member note textarea (#log...)
+     ========================= */
+
+  const LUX_LOG_UI = { mounted: false, rootId: 'lux-lognote-panel' };
+
+  function lux_getLogPanelHost() {
+    // place under the member note textarea if possible, else inside popup
+    const box = memberNoteTextarea();
+    if (box && box.parentElement) return box.parentElement;
+    return ui && ui.popup ? ui.popup : document.body;
+  }
+
+  function lux_unmountLogPanel() {
+    const old = document.getElementById(LUX_LOG_UI.rootId);
+    if (old) old.remove();
+    LUX_LOG_UI.mounted = false;
+  }
+
+  function lux_mountLogPanel() {
+    if (document.getElementById(LUX_LOG_UI.rootId)) { LUX_LOG_UI.mounted = true; return; }
+
+    const host = lux_getLogPanelHost();
+    if (!host) return;
+
+    const panel = document.createElement('div');
+    panel.id = LUX_LOG_UI.rootId;
+    panel.style.cssText = `
+      margin-top:10px;
+      border:1px solid #3a4155;
+      background:#141414;
+      color:#eaeaea;
+      border-radius:12px;
+      padding:10px;
+      font-family:system-ui,sans-serif;
+    `;
+
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div style="font-weight:800">Lognote helper</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button id="lux-log-apply-all" style="background:#0b3d91;color:#fff;border:0;border-radius:10px;padding:6px 10px;font-weight:800;cursor:pointer">Apply all</button>
+          <button id="lux-log-clear" style="background:#303741;color:#eaeaea;border:0;border-radius:10px;padding:6px 10px;font-weight:700;cursor:pointer">Clear</button>
+        </div>
+      </div>
+      <div id="lux-log-items" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+      <div style="font-size:12px;opacity:.85;margin-top:8px">Tip, click a chip to insert it, or Apply all.</div>
+    `;
+
+    host.appendChild(panel);
+
+    panel.querySelector('#lux-log-clear').addEventListener('click', () => {
+      panel.querySelector('#lux-log-items').innerHTML = '';
+    });
+
+    panel.querySelector('#lux-log-apply-all').addEventListener('click', async () => {
+      const items = [...panel.querySelectorAll('[data-k][data-v]')].map(x => ({ k: x.getAttribute('data-k'), v: x.getAttribute('data-v') }));
+      if (!items.length) { notify('Nothing to apply'); return; }
+      const obj = {};
+      items.forEach(it => { if (it.k && it.v) obj[it.k] = it.v; });
+      await lux_applyFactsToMemberNote(obj);
+    });
+
+    LUX_LOG_UI.mounted = true;
+  }
+
+  function lux_renderFactChips(factsObj) {
+    if (!factsObj) return;
+    lux_mountLogPanel();
+    const panel = document.getElementById(LUX_LOG_UI.rootId);
+    if (!panel) return;
+    const items = panel.querySelector('#lux-log-items');
+    if (!items) return;
+
+    items.innerHTML = '';
+
+    const entries = Object.entries(factsObj || {});
+    if (!entries.length) return;
+
+    entries.forEach(([k, v]) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.setAttribute('data-k', k);
+      chip.setAttribute('data-v', String(v));
+      chip.textContent = `${k}: ${String(v)}`;
+      chip.style.cssText = `
+        background:#1f2937;
+        color:#cfe0ff;
+        border:1px solid #3c4c66;
+        border-radius:999px;
+        padding:6px 10px;
+        cursor:pointer;
+        font-weight:700;
+        font-size:12px;
+      `;
+      chip.addEventListener('click', async () => {
+        await lux_applyFactsToMemberNote({ [k]: String(v) });
+      });
+      items.appendChild(chip);
+    });
+  }
+
+  async function lux_applyFactsToMemberNote(facts) {
     try {
-      if (!facts) return false;
+      if (!facts || !Object.keys(facts).length) return false;
+
       let noteBox = await waitForMemberNoteTextarea(2800);
-      if (!noteBox) return false;
+      if (!noteBox) { notify('Lognote box not found'); return false; }
 
       noteBox = memberNoteTextarea() || noteBox;
+
       const existingText = String(noteBox.value || '').trim();
       const existing = parseExistingMemberNote(existingText);
       const { merged, changed } = mergeMemberFacts(existing, facts);
       const finalText = formatMemberNote(merged);
       if (!finalText) return false;
 
-      const newHash = String(hashStr(finalText));
-      const lastHash = GM_getValue(lux_noteThreadKey(), '');
-      if (!changed && existingText.trim() === finalText.trim()) return false;
-      if (lastHash && lastHash === newHash && existingText.trim() === finalText.trim()) return false;
+      if (!changed && existingText.trim() === finalText.trim()) {
+        notify('Lognote already up to date');
+        return false;
+      }
 
+      noteBox = memberNoteTextarea() || noteBox;
       noteBox.scrollIntoView({ block: 'nearest' });
       try { noteBox.click(); } catch {}
       noteBox.focus();
@@ -1063,10 +1244,10 @@ async function lux_ensureAccess() {
       setFieldValue(noteBox, finalText);
       try { noteBox.selectionStart = noteBox.selectionEnd = finalText.length; } catch {}
       fireFieldEvents(noteBox);
-      await sleep(60);
+      await sleep(80);
       fireFieldEvents(noteBox);
 
-      GM_setValue(lux_noteThreadKey(), newHash);
+      GM_setValue(lux_noteThreadKey(), String(hashStr(finalText)));
 
       if (LUX_NOTE_AUTOSAVE) {
         const saveBtn = memberNoteSaveButton();
@@ -1081,7 +1262,7 @@ async function lux_ensureAccess() {
       }
       return true;
     } catch (e) {
-      console.warn('LUX apply facts failed', e);
+      console.warn('LUX applyFactsToMemberNote failed', e);
       return false;
     }
   }
@@ -1090,34 +1271,25 @@ async function lux_ensureAccess() {
     try {
       const facts = parseClientFactsFromLatestMessage(messageText);
       luxDebug('Extracted facts', facts, 'from', messageText);
-      if (!facts) return false;
-      return await applyFactsToMemberNote(facts);
+
+      // show chips for click/apply (NEW)
+      if (facts) lux_renderFactChips(facts);
+
+      if (!facts) {
+        luxDebug('No neutral facts found in latest message');
+        return false;
+      }
+
+      // still draft into the textarea automatically (original behavior)
+      return await lux_applyFactsToMemberNote(facts);
     } catch (e) {
       console.warn('LUX member note logging failed', e);
       return false;
     }
   }
-
+   
   const css = document.createElement('style');
-  css.textContent = `
-    #lux-btn{position:fixed;bottom:20px;right:20px;z-index:99999;background:#0b3d91;color:#fff;border:0;padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(11,61,145,.3)}
-    #lux-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:820px;max-width:98vw;max-height:84vh;overflow:auto;background:#1f1f1f;color:#eee;border:2px solid #0b3d91;border-radius:14px;padding:14px;z-index:100000;display:none;font-family:system-ui,sans-serif}
-    #lux-responses{display:flex;flex-direction:column;gap:8px}
-    .lux-reply{white-space:pre-wrap;border:1px solid #3a4155;border-radius:10px;padding:10px;background:#252525;color:#eaeaea;cursor:pointer}
-    #lux-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-    #lux-actions button{flex:1 1 150px}
-    #lux-settings-panel{display:none;margin-top:8px;border:1px solid #3a4155;border-radius:8px;padding:8px;background:#222;color:#eaeaea}
-    #lux-settings-panel input[type=text],#lux-settings-panel textarea{width:100%;padding:6px;border:1px solid #3a4155;background:#1a1a1a;color:#eaeaea;border-radius:6px;margin:4px 0}
-    #lux-models{background:#2b3545;color:#bcd7ff;border:0;border-radius:8px;padding:8px 10px;font-weight:700}
-    #lux-models-panel{display:none;margin-top:8px;border:1px dashed #3c4c66;border-radius:8px;padding:8px}
-    #lux-models-panel .lux-model{margin:4px;padding:6px 10px;border:1px solid #3c4c66;border-radius:8px;background:#1f2937;color:#cfe0ff;cursor:pointer}
-    #lux-models-panel .lux-tag{display:inline-block;background:#0b3d91;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px}
-    #lux-facts{margin:8px 0 10px 0;border:1px solid #3a4155;border-radius:10px;padding:8px;background:#232323}
-    #lux-facts-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
-    #lux-facts-chips{display:flex;flex-wrap:wrap;gap:6px}
-    .lux-fact-chip{border:1px solid #3c4c66;background:#1f2937;color:#cfe0ff;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
-    .lux-fact-chip:hover{filter:brightness(1.08)}
-  `;
+  css.textContent = `#lux-btn{position:fixed;bottom:20px;right:20px;z-index:99999;background:#0b3d91;color:#fff;border:0;padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(11,61,145,.3)}#lux-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:820px;max-width:98vw;max-height:84vh;overflow:auto;background:#1f1f1f;color:#eee;border:2px solid #0b3d91;border-radius:14px;padding:14px;z-index:100000;display:none;font-family:system-ui,sans-serif}#lux-responses{display:flex;flex-direction:column;gap:8px}.lux-reply{white-space:pre-wrap;border:1px solid #3a4155;border-radius:10px;padding:10px;background:#252525;color:#eaeaea;cursor:pointer}#lux-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}#lux-actions button{flex:1 1 150px}#lux-settings-panel{display:none;margin-top:8px;border:1px solid #3a4155;border-radius:8px;padding:8px;background:#222;color:#eaeaea}#lux-settings-panel input[type=text],#lux-settings-panel textarea{width:100%;padding:6px;border:1px solid #3a4155;background:#1a1a1a;color:#eaeaea;border-radius:6px;margin:4px 0}#lux-models{background:#2b3545;color:#bcd7ff;border:0;border-radius:8px;padding:8px 10px;font-weight:700}#lux-models-panel{display:none;margin-top:8px;border:1px dashed #3c4c66;border-radius:8px;padding:8px}#lux-models-panel .lux-model{margin:4px;padding:6px 10px;border:1px solid #3c4c66;border-radius:8px;background:#1f2937;color:#cfe0ff;cursor:pointer}#lux-models-panel .lux-tag{display:inline-block;background:#0b3d91;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px}`;
   document.head.appendChild(css);
 
   const btn = document.createElement('button');
@@ -1129,19 +1301,8 @@ async function lux_ensureAccess() {
   pop.id = 'lux-popup';
   pop.innerHTML = `
   <div id="lux-topbar" style="margin-bottom:8px"></div>
-
   <textarea id="lux-customer" placeholder="Latest customer message" style="width:100%;min-height:96px;border:1px solid #3a4155;background:#2a2a2a;color:#fff;border-radius:8px;padding:8px;margin:8px 0"></textarea>
-
-  <div id="lux-facts" style="display:none">
-    <div id="lux-facts-head">
-      <div><strong>Log picks</strong> <span style="opacity:.8;font-size:12px">tap to drop into member note</span></div>
-      <button id="lux-facts-apply" style="background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:6px 10px;font-weight:700;cursor:pointer">Apply all</button>
-    </div>
-    <div id="lux-facts-chips"></div>
-  </div>
-
   <div id="lux-responses"></div>
-
   <div id="lux-actions">
     <button id="lux-send" style="background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Send</button>
     <button id="lux-regen" style="background:#113a6b;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Regenerate</button>
@@ -1149,9 +1310,7 @@ async function lux_ensureAccess() {
     <button id="lux-settings" style="background:#303741;color:#eaeaea;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Settings</button>
     <button id="lux-close" style="background:#303741;color:#eaeaea;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Close</button>
   </div>
-
   <div id="lux-models-panel"></div>
-
   <div id="lux-settings-panel">
     <div><strong>Backend URL</strong></div><input type="text" id="lux-api-url">
     <div><strong>OpenRouter API Key</strong></div><input type="text" id="lux-api-key">
@@ -1170,9 +1329,6 @@ async function lux_ensureAccess() {
     popup: pop,
     topbar: pop.querySelector('#lux-topbar'),
     customer: pop.querySelector('#lux-customer'),
-    factsWrap: pop.querySelector('#lux-facts'),
-    factsChips: pop.querySelector('#lux-facts-chips'),
-    factsApply: pop.querySelector('#lux-facts-apply'),
     list: pop.querySelector('#lux-responses'),
     send: pop.querySelector('#lux-send'),
     regen: pop.querySelector('#lux-regen'),
@@ -1271,6 +1427,10 @@ async function lux_ensureAccess() {
     function mountTopbar(container) {
       ensureStyles();
       if (!container) return null;
+      // IMPORTANT: do not duplicate if already mounted
+      const existing = container.querySelector('#' + ids.topbar);
+      if (existing) return existing;
+
       const top = document.createElement('div');
       top.id = ids.topbar;
       top.className = 'luxpatch-topbar';
@@ -1300,39 +1460,10 @@ async function lux_ensureAccess() {
   LUXPatch.UIChips.mountTopbar(ui.topbar);
   LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || 'default'), countryLabel: parseProfileCountry() || '—' });
 
-  // clickable fact chips
-  let __LUX_LAST_FACTS = null;
-
-  function renderFactChipsFromMessage(messageText) {
-    const facts = parseClientFactsFromLatestMessage(messageText || '');
-    __LUX_LAST_FACTS = facts;
-    if (!facts || !Object.keys(facts).length) {
-      ui.factsWrap.style.display = 'none';
-      ui.factsChips.innerHTML = '';
-      return;
-    }
-    ui.factsWrap.style.display = 'block';
-    ui.factsChips.innerHTML = '';
-
-    Object.entries(facts).forEach(([k, v]) => {
-      const chip = document.createElement('div');
-      chip.className = 'lux-fact-chip';
-      chip.textContent = `${k}: ${normalizeLooseText(v)}`;
-      chip.title = 'Tap to apply this to member note';
-      chip.addEventListener('click', async () => {
-        const one = {}; one[k] = v;
-        const ok = await applyFactsToMemberNote(one);
-        if (ok) notify(`Added ${k}`);
-      });
-      ui.factsChips.appendChild(chip);
-    });
-  }
-
-  ui.factsApply.addEventListener('click', async () => {
-    if (!__LUX_LAST_FACTS) return;
-    const ok = await applyFactsToMemberNote(__LUX_LAST_FACTS);
-    if (ok) notify('Applied all log picks');
-  });
+  // Ensure log panel appears whenever popup opens too (NEW)
+  (function luxEnsureLogPanelOnPopup() {
+    try { lux_mountLogPanel(); } catch {}
+  })();
 
   LUXPatch.NoRepeat = (() => {
     const bannedPhrases = [
@@ -1454,8 +1585,8 @@ async function lux_ensureAccess() {
         kind === 'meet'
           ? 'He is trying to meet up or push availability.'
           : kind === 'address'
-            ? 'He is asking for your address or exact place.'
-            : 'He is asking for your contact details or off site connection.';
+          ? 'He is asking for your address or exact place.'
+          : 'He is asking for your contact details or off site connection.';
 
       const sys = [
         'You are an adult woman on a dating site.',
@@ -1469,12 +1600,14 @@ async function lux_ensureAccess() {
         'Avoid these stale patterns, I am nervous about sharing personal details, it does not feel right yet, I would rather keep chatting here and get to know each other better first.',
         'Avoid sounding too clean or too perfect.',
         'No contacts, no meetups, no addresses, keep the boundary firm.',
+        'You may be warm, teasing, guarded, plainspoken, or gently distant depending on the chosen style.',
         `Chosen refusal style: ${picked.name}. ${picked.rule}`,
         'Only use comma, period, question mark, and apostrophe.',
         'No emojis.',
         'No semicolons, no em dashes, no parentheses.',
         'Keep it to 2 or 3 sentences.',
         'If you end with a question, make it interesting, not generic.',
+        'Avoid generic questions like what made you reach out, what are you up to, tell me about yourself, or how was your day.',
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         personaCardLine(profileCard) || ''
       ].join(' ');
@@ -1497,7 +1630,10 @@ async function lux_ensureAccess() {
       let out = '';
       try {
         out = await llmCall(
-          [{ role: 'system', content: sys }, { role: 'user', content: user }],
+          [
+            { role: 'system', content: sys },
+            { role: 'user', content: user }
+          ],
           concise
         );
       } catch {}
@@ -1651,18 +1787,14 @@ async function lux_ensureAccess() {
     return clampToLimit(t);
   }
 
-  // === PATCH: resilient empty-content retry (1x) ===
   async function llmCall(messages, overrides = {}) {
     if (!lux_canSendRequest()) throw new Error('Rate-limited');
     const key = lux_getApiKey().trim();
     const model = GM_getValue('lux_model', MODEL_DEFAULT).trim();
     if (!key) throw new Error('Missing OpenRouter API key');
-
     const base = getModelPreset(model);
     const tuned = withCreativeBoost(base, (messages?.[messages.length - 1]?.content) || '');
-    const baseSeed = (typeof tuned.seed === 'number' ? tuned.seed : 11);
-
-    const buildBody = (seedBump = 0) => sanitizePayloadForModel({
+    let body = sanitizePayloadForModel({
       model,
       messages,
       temperature: tuned.temperature,
@@ -1670,13 +1802,10 @@ async function lux_ensureAccess() {
       max_tokens: tuned.max_tokens,
       repetition_penalty: tuned.repetition_penalty,
       stop: tuned.stop,
-      seed: baseSeed + seedBump,
-      ...overrides,
-      seed: (overrides && typeof overrides.seed === 'number') ? overrides.seed : (baseSeed + seedBump)
+      seed: tuned.seed,
+      ...overrides
     }, model);
-
-    const sendOnce = (seedBump) => new Promise((resolve, reject) => {
-      const body = buildBody(seedBump);
+    return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: 'POST',
         url: OPENROUTER_API_URL,
@@ -1693,7 +1822,7 @@ async function lux_ensureAccess() {
             if (res.status < 200 || res.status >= 300) return reject(new Error(`OpenRouter HTTP ${res.status}: ${trimText(res.responseText, 280)}`));
             const data = JSON.parse(res.responseText || '{}');
             const content = data?.choices?.[0]?.message?.content?.trim();
-            if (!content) return resolve('');
+            if (!content) return reject(new Error('Empty content from OpenRouter'));
             resolve(content);
           } catch (e) { reject(e); }
         },
@@ -1701,15 +1830,6 @@ async function lux_ensureAccess() {
         ontimeout: () => reject(new Error('OpenRouter timeout'))
       });
     });
-
-    const first = await sendOnce(0);
-    if (first) return first;
-
-    // 1x retry with slight seed bump and shorter max_tokens to avoid silent empty
-    const retry = await sendOnce(1);
-    if (retry) return retry;
-
-    throw new Error('Empty content from OpenRouter');
   }
 
   function buildSystemPrompt(leftCard, customSystem, imageNotes) {
@@ -1824,37 +1944,6 @@ async function lux_ensureAccess() {
     lux_showErrorOverlay(String(text || 'Unknown error contacting OpenRouter.'));
   }
 
-  // === PATCH: dedicated greeting handler ===
-  function isGreetingOnly(msg) {
-    const s = normalizeLooseText(stripStampsAll(msg || '')).toLowerCase();
-    if (!s) return false;
-    if (s.length > 18) return false;
-    return /^(hi|hello|hey|heyy+|hiya|yo|sup|wassup|what'?s up|good (?:morning|afternoon|evening)|gm|gn)\b/.test(s);
-  }
-
-  async function greetReply(leftCard, rawMsg) {
-    const tc = buildTimeContext();
-    const accent = getAccentInstructionByCountry(leftCard?.country || '');
-    const sys = [
-      'You are an adult woman on a dating site.',
-      accent,
-      'Reply to a simple greeting in a warm, natural, feminine way.',
-      'Do not be robotic, do not sound like customer support.',
-      'No emojis.',
-      'Only use comma, period, question mark, and apostrophe.',
-      'Keep it 2 short sentences.',
-      'End with exactly one open ended question that is interesting and easy to answer.',
-      'Avoid generic questions like how was your day, what are you up to, tell me about yourself.',
-      `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-      personaCardLine(leftCard) || ''
-    ].join(' ');
-    const user = `Customer: "${rawMsg}"\nWrite the reply now.`;
-    let out = '';
-    try { out = await llmCall([{ role: 'system', content: sys }, { role: 'user', content: user }], { max_tokens: 90, temperature: 0.55, top_p: 0.92 }); } catch {}
-    out = postFormat(out || '');
-    return out || "Hey, you just slid in quietly and I noticed. What kind of mood are you in right now?";
-  }
-
   async function callBackend(msgText) {
     if (!lux_canSendRequest()) return;
     const leftCard = parseLeftProfile();
@@ -1864,14 +1953,11 @@ async function lux_ensureAccess() {
     const imageNotes = (split.notes || '').trim();
     window.__LUX_LAST_USER = rawMsg;
 
-    renderFactChipsFromMessage(rawMsg);
-
-    if (isGreetingOnly(rawMsg)) {
-      const out = await greetReply(leftCard, rawMsg);
-      showReplies([out]);
-      pushHist(rawMsg, out);
-      return;
-    }
+    // NEW: always attempt to parse and show log chips on every callBackend too
+    try {
+      const facts = parseClientFactsFromLatestMessage(rawMsg);
+      if (facts) lux_renderFactChips(facts);
+    } catch {}
 
     const blockedKind = Safety.getBlockedTopic(rawMsg);
     if (blockedKind) {
@@ -1956,7 +2042,7 @@ async function lux_ensureAccess() {
     headers['HTTP-Referer'] = location.origin;
     headers['X-Title'] = document.title || 'LUX Userscript';
 
-    const basePayload = sanitizePayloadForModel({
+    let payload = sanitizePayloadForModel({
       model: chosenModel,
       messages,
       temperature: tuned.temperature,
@@ -1967,58 +2053,33 @@ async function lux_ensureAccess() {
       seed: tuned.seed
     }, chosenModel);
 
-    const sendPayload = (payload) => new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
-        method: 'POST',
-        url: api,
-        headers,
-        data: JSON.stringify(payload),
-        timeout: REQUEST_TIMEOUT_MS,
-        onload: (res) => resolve(res),
-        onerror: () => reject(new Error('Network error talking to OpenRouter.')),
-        ontimeout: () => reject(new Error('OpenRouter request timed out.'))
-      });
+    GM_xmlhttpRequest({
+      method: 'POST', url: api, headers, data: JSON.stringify(payload), timeout: REQUEST_TIMEOUT_MS,
+      onload: async (res) => {
+        try {
+          if (res.status < 200 || res.status >= 300) {
+            let msg;
+            if (res.status === 401) msg = 'OpenRouter API key is invalid or unauthorized.';
+            else if (res.status === 402) msg = 'OpenRouter billing or quota exceeded, HTTP 402.';
+            else if (res.status === 404) msg = 'OpenRouter endpoint or model not found, HTTP 404.';
+            else if (res.status === 429) msg = 'OpenRouter rate limit reached, HTTP 429.';
+            else msg = `HTTP ${res.status} ${res.statusText || ''}`.trim();
+            errorReply(msg); return;
+          }
+          const data = JSON.parse(res.responseText || '{}');
+          const raw = (data?.choices?.[0]?.message?.content || '');
+          if (!raw) { errorReply('The server replied but no content was found.'); return; }
+          let content = raw;
+          content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
+          content = postFormat(content);
+          LUXPatch.UIChips.refresh({ modelLabel: chosenModel, countryLabel: leftCard?.country || '—' });
+          showReplies([content]);
+          pushHist(rawMsg, content);
+        } catch (e) { errorReply('Parse error: ' + String(e)); }
+      },
+      onerror: () => errorReply('Network error talking to OpenRouter.'),
+      ontimeout: () => errorReply('OpenRouter request timed out.')
     });
-
-    try {
-      // first attempt
-      let res = await sendPayload(basePayload);
-
-      const handle = async (resObj, isRetry) => {
-        if (resObj.status < 200 || resObj.status >= 300) {
-          let msg;
-          if (resObj.status === 401) msg = 'OpenRouter API key is invalid or unauthorized.';
-          else if (resObj.status === 402) msg = 'OpenRouter billing or quota exceeded, HTTP 402.';
-          else if (resObj.status === 404) msg = 'OpenRouter endpoint or model not found, HTTP 404.';
-          else if (resObj.status === 429) msg = 'OpenRouter rate limit reached, HTTP 429.';
-          else msg = `HTTP ${resObj.status} ${resObj.statusText || ''}`.trim();
-          throw new Error(msg);
-        }
-        const data = JSON.parse(resObj.responseText || '{}');
-        const raw = (data?.choices?.[0]?.message?.content || '').trim();
-        if (!raw) {
-          if (!isRetry) return null;
-          throw new Error('The server replied but no content was found.');
-        }
-        let content = raw;
-        content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
-        content = postFormat(content);
-        LUXPatch.UIChips.refresh({ modelLabel: chosenModel, countryLabel: leftCard?.country || '—' });
-        showReplies([content]);
-        pushHist(rawMsg, content);
-        return content;
-      };
-
-      let got = await handle(res, false);
-      if (!got) {
-        // retry once with seed bump + smaller max_tokens
-        const retryPayload = { ...basePayload, seed: (typeof basePayload.seed === 'number' ? basePayload.seed + 1 : 12), max_tokens: Math.max(180, Math.min(240, basePayload.max_tokens || 220)) };
-        res = await sendPayload(retryPayload);
-        await handle(res, true);
-      }
-    } catch (e) {
-      errorReply(String(e?.message || e));
-    }
   }
 
   function pushHist(user, assistant) {
@@ -2044,8 +2105,6 @@ async function lux_ensureAccess() {
     else if (proto) {
       const protoDesc = Object.getOwnPropertyDescriptor(proto, 'value');
       protoDesc && protoDesc.set && protoDesc.set.call(el, value);
-    } else {
-      el.value = value;
     }
   }
 
@@ -2054,9 +2113,9 @@ async function lux_ensureAccess() {
     try { el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: el.value })); } catch {}
     try { el.dispatchEvent(new FocusEvent('focus', opts)); } catch { el.dispatchEvent(new Event('focus', opts)); }
     try { el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: el.value })); } catch { el.dispatchEvent(new Event('input', opts)); }
-    try { el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true })); } catch {}
-    try { el.dispatchEvent(new KeyboardEvent('keypress', { key: ' ', code: 'Space', bubbles: true })); } catch {}
-    try { el.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true })); } catch {}
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keypress', { key: ' ', code: 'Space', bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true }));
     el.dispatchEvent(new Event('change', opts));
   }
 
@@ -2072,11 +2131,12 @@ async function lux_ensureAccess() {
     return true;
   }
 
+  // ========= UI Hooks =========
   btn.addEventListener('click', () => {
     ui.popup.style.display = 'block';
     ui.customer.focus();
     LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || 'default'), countryLabel: parseProfileCountry() || '—' });
-    renderFactChipsFromMessage(ui.customer.value || '');
+    try { lux_mountLogPanel(); } catch {}
   });
 
   ui.close.addEventListener('click', () => {
@@ -2136,61 +2196,407 @@ async function lux_ensureAccess() {
     } finally { ui.regen.disabled = false; }
   };
 
-  function processLatestTurn() {
-    const root = document.querySelector(THREAD_SEL);
-    if (!root) return;
-    const nodes = [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
-    const turns = [];
-    for (const row of nodes) {
-      const fromClient = row.matches(CLIENT_MSG_SELECTOR);
-      const content = extractMessageContent(row);
-      if (content) turns.push({ role: fromClient ? 'user' : 'assistant', content: stripStampsKeepMeta(content) });
-    }
-    const lastUser = turns.slice().reverse().find(t => t.role === 'user');
-    if (!lastUser) return;
+/* =========================
+   LUX FULL SCRIPT (UPDATED)
+   Part 4 of 4
+   ========================= */
 
-    const split = extractLuxImageMeta(lastUser.content || '');
-    const cleanForUI = stripStampsAll(split.text || '');
-    if (!cleanForUI || cleanForUI === lastSeen) return;
-    lastSeen = cleanForUI;
+  // ========= Auto Pop (fixed) =========
+  // Opens LUX automatically when a conversation loads, without needing you to click the button first.
+  // We gate it so it doesn't annoy you on every tiny DOM change.
+  (function luxAutoPop() {
+    const already = GM_getValue('lux_autopop_done', 0);
+    const enabled = GM_getValue('lux_autopop_enabled', 1);
+    if (!enabled) return;
 
-    if (turns.length) {
-      shortHistory = turns.slice(-HISTORY_MAX).map(t => ({
-        role: t.role,
-        content: stripStampsAll(extractLuxImageMeta(t.content || '').text || '')
-      }));
-      _saveHistory();
-    }
-
-    ui.customer.value = cleanForUI;
-    ui.popup.style.display = 'block';
-    ui.customer.focus();
-    LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || 'default'), countryLabel: parseProfileCountry() || '—' });
-
-    renderFactChipsFromMessage(cleanForUI);
-
-    for (const delay of LUX_NOTE_RETRY_DELAYS) {
-      setTimeout(() => {
-        autoLogLatestClientInfo(cleanForUI).catch(err => console.warn('LUX member note draft error', err));
-      }, delay);
+    function canPopNow() {
+      // Must have a visible reply textarea somewhere OR log textarea (right panel)
+      const reply = document.querySelector(REPLY_INPUT_SELECTOR);
+      const log = document.querySelector(LOG_TEXTAREA_SELECTOR);
+      const isVisible = (el) => {
+        if (!el) return false;
+        const s = getComputedStyle(el);
+        return s.display !== 'none' && s.visibility !== 'hidden' && el.offsetParent !== null;
+      };
+      return isVisible(reply) || isVisible(log);
     }
 
-    callBackend(lastUser.content);
+    function openOnce() {
+      if (window.__LUX_AUTOPENED) return;
+      if (!canPopNow()) return;
+      window.__LUX_AUTOPENED = true;
+
+      // Mount log panel early
+      try { lux_mountLogPanel(); } catch {}
+
+      // Open UI
+      try {
+        ui.popup.style.display = 'block';
+        LUXPatch.UIChips.refresh({
+          modelLabel: (GM_getValue('lux_model', MODEL_DEFAULT) || 'default'),
+          countryLabel: parseProfileCountry() || '—'
+        });
+
+        // Preload latest customer msg into lux-customer for convenience
+        const latest = getLatestCustomerMessage();
+        if (latest && latest.trim()) {
+          ui.customer.value = latest.trim();
+          // Also update chips for log facts
+          try {
+            const facts = parseClientFactsFromLatestMessage(latest.trim());
+            lux_renderFactChips(facts);
+          } catch {}
+        }
+      } catch {}
+
+      GM_setValue('lux_autopop_done', 1);
+    }
+
+    // Run a few times early, then fall back to observers
+    let tries = 0;
+    const t = setInterval(() => {
+      tries++;
+      openOnce();
+      if (window.__LUX_AUTOPENED || tries > 25) clearInterval(t);
+    }, 450);
+
+    // Observe DOM for navigation changes within SPA
+    const obs = new MutationObserver(() => {
+      if (window.__LUX_AUTOPENED) return;
+      openOnce();
+    });
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+  })();
+
+  // ========= Reliable Latest Customer Message Getter =========
+  function getLatestCustomerMessage() {
+    try {
+      const msgs = document.querySelectorAll(MSG_BLOCK_SELECTOR);
+      if (!msgs || !msgs.length) return '';
+      // pick last message that is NOT from operator
+      // your platform has various classes, so we check text color style is unreliable,
+      // instead we look for operator badges or left/right alignment heuristics.
+      // If your site has a clean selector for customer side, replace this logic.
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const node = msgs[i];
+        const txt = (node.innerText || '').trim();
+        if (!txt) continue;
+
+        const isOperator =
+          node.closest('.operator') ||
+          node.classList.contains('operator') ||
+          node.classList.contains('me') ||
+          node.querySelector('.operator-badge');
+
+        if (!isOperator) return txt;
+      }
+      // fallback: last message text
+      return (msgs[msgs.length - 1].innerText || '').trim();
+    } catch { return ''; }
   }
 
-  function setupThreadWatcher() {
-    const root = document.querySelector(THREAD_SEL);
-    if (!root) return false;
-    const obs = new MutationObserver(() => { processLatestTurn(); });
-    obs.observe(root, { childList: true, subtree: true });
-    processLatestTurn();
+  // ========= Log Note Panel (click to apply) - FIXED =========
+  // Key fix: using setNativeValue + proper input events on RIGHT textarea selector.
+  function lux_applyToLogTextarea(text) {
+    const el = document.querySelector(LOG_TEXTAREA_SELECTOR);
+    if (!el) { notify('Log textarea not found on the right. Check selector.'); return false; }
+    el.scrollIntoView({ block: 'nearest' });
+    el.focus();
+    const val = (text || '').trim();
+    setNativeValue(el, val);
+    fireTypingEvents(el);
+    if (typeof queueMicrotask === 'function') queueMicrotask(() => fireTypingEvents(el));
+    else setTimeout(() => fireTypingEvents(el), 0);
     return true;
   }
 
-  if (!setupThreadWatcher()) {
-    const fallbackId = setInterval(() => {
-      if (setupThreadWatcher()) clearInterval(fallbackId);
-    }, POLL_MS);
+  function lux_appendToLogTextarea(text) {
+    const el = document.querySelector(LOG_TEXTAREA_SELECTOR);
+    if (!el) { notify('Log textarea not found on the right. Check selector.'); return false; }
+    el.scrollIntoView({ block: 'nearest' });
+    el.focus();
+    const cur = (el.value || '').trim();
+    const add = (text || '').trim();
+    const next = cur ? (cur + '\n' + add) : add;
+    setNativeValue(el, next);
+    fireTypingEvents(el);
+    if (typeof queueMicrotask === 'function') queueMicrotask(() => fireTypingEvents(el));
+    else setTimeout(() => fireTypingEvents(el), 0);
+    return true;
   }
 
-})();
+  // ========= Customer Fact Extraction (NAME + WORK + YEARS + HOBBIES) =========
+  // Fix: better name capture for "I'm Mike", "I am Mike", "call me Mike", "this is Mike", "my name is Mike",
+  // and also name embedded at the end.
+  function extractNameFromText(text) {
+    const s = (text || '').replace(/\s+/g, ' ').trim();
+
+    const patterns = [
+      /\b(?:i\s*am|i['’]?m)\s+([A-Z][a-z]{1,20})(?:\b|[,.!?\s])/,
+      /\bmy\s+name\s+is\s+([A-Z][a-z]{1,20})(?:\b|[,.!?\s])/i,
+      /\bcall\s+me\s+([A-Z][a-z]{1,20})(?:\b|[,.!?\s])/i,
+      /\bthis\s+is\s+([A-Z][a-z]{1,20})(?:\b|[,.!?\s])/i,
+      /\byou\s+can\s+call\s+me\s+([A-Z][a-z]{1,20})(?:\b|[,.!?\s])/i,
+      /\bi\s+go\s+by\s+([A-Z][a-z]{1,20})(?:\b|[,.!?\s])/i
+    ];
+
+    for (const re of patterns) {
+      const m = s.match(re);
+      if (m && m[1]) return cleanName(m[1]);
+    }
+
+    // End-of-message name hint: "... , Mike"
+    const endName = s.match(/(?:^|[,.!?\s])([A-Z][a-z]{1,20})\s*$/);
+    if (endName && endName[1]) {
+      const n = cleanName(endName[1]);
+      if (n && !isCommonNonName(n)) return n;
+    }
+
+    return '';
+  }
+
+  function cleanName(n) {
+    let name = String(n || '').replace(/[^A-Za-z]/g, '').trim();
+    if (!name) return '';
+    name = name[0].toUpperCase() + name.slice(1).toLowerCase();
+    if (name.length < 2) return '';
+    return name;
+  }
+
+  function isCommonNonName(n) {
+    const bad = new Set(['Ok','Okay','Yes','Yeah','Thanks','Thank','Hello','Hi','Hey','Bro','Man','Baby','Babe','Dear','Darling']);
+    return bad.has(n);
+  }
+
+  function extractWorkFromText(text) {
+    const s = (text || '').replace(/\s+/g, ' ').trim();
+
+    // Examples:
+    // "I was in the Army for 30 years"
+    // "I worked as an engineer for 40 years"
+    // "I've been a nurse for 12 years"
+    // "I am an electrician"
+    const patterns = [
+      /\b(?:i\s+was\s+in\s+the\s+)(army|navy|air\s+force|marines|military)\b(?:.*?\bfor\s+(\d{1,2})\s+years?\b)?/i,
+      /\b(?:i\s+(?:work|worked)\s+as\s+an?\s+)([A-Za-z][A-Za-z\s]{2,40})(?:\s+for\s+(\d{1,2})\s+years?\b)?/i,
+      /\b(?:i['’]?ve\s+been\s+an?\s+)([A-Za-z][A-Za-z\s]{2,40})(?:\s+for\s+(\d{1,2})\s+years?\b)?/i,
+      /\b(?:i\s+am\s+an?\s+)([A-Za-z][A-Za-z\s]{2,40})\b/i,
+      /\b(?:i\s+do\s+)([A-Za-z][A-Za-z\s]{2,40})\s+for\s+work\b/i
+    ];
+
+    for (const re of patterns) {
+      const m = s.match(re);
+      if (m) {
+        let role = (m[1] || '').trim();
+        role = role.replace(/\b(?:for|since|about|around)\b.*$/i, '').trim();
+        role = role.replace(/\s{2,}/g, ' ');
+        role = role.replace(/[^A-Za-z\s]/g, '').trim();
+        let years = (m[2] || '').trim();
+        if (role) return { role, years: years ? years : '' };
+      }
+    }
+    return { role: '', years: '' };
+  }
+
+  function extractHobbiesFromText(text) {
+    const s = (text || '').toLowerCase();
+    const hits = [];
+    const map = [
+      ['gym','gym'],
+      ['workout','workout'],
+      ['fitness','fitness'],
+      ['football','football'],
+      ['soccer','football'],
+      ['basketball','basketball'],
+      ['music','music'],
+      ['guitar','guitar'],
+      ['piano','piano'],
+      ['movies','movies'],
+      ['film','movies'],
+      ['reading','reading'],
+      ['books','reading'],
+      ['travel','travel'],
+      ['cooking','cooking'],
+      ['baking','baking'],
+      ['hiking','hiking'],
+      ['gaming','gaming'],
+      ['swimming','swimming'],
+      ['running','running'],
+      ['cycling','cycling'],
+      ['fishing','fishing']
+    ];
+    for (const [k, v] of map) if (s.includes(k)) hits.push(v);
+    return [...new Set(hits)].slice(0, 6);
+  }
+
+  function parseClientFactsFromLatestMessage(latestCustomerMsg) {
+    const msg = (latestCustomerMsg || '').trim();
+    if (!msg) return { name: '', role: '', years: '', hobbies: [] };
+
+    const name = extractNameFromText(msg);
+    const work = extractWorkFromText(msg);
+    const hobbies = extractHobbiesFromText(msg);
+
+    return {
+      name,
+      role: work.role || '',
+      years: work.years || '',
+      hobbies
+    };
+  }
+
+  // ========= Log Fact Chips UI =========
+  // click a chip to append that fact to the right textarea
+  function lux_mountLogPanel() {
+    if (document.getElementById('lux-log-panel')) return;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'lux-log-panel';
+    wrap.style.marginTop = '10px';
+    wrap.style.border = '1px solid #3a4155';
+    wrap.style.borderRadius = '10px';
+    wrap.style.padding = '10px';
+    wrap.style.background = '#1d1d1d';
+
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <strong>Log Notes Helper</strong>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="lux-log-applyall" style="background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:6px 10px;font-weight:700">Apply all</button>
+          <button id="lux-log-clear" style="background:#303741;color:#eaeaea;border:0;border-radius:8px;padding:6px 10px;font-weight:700">Clear</button>
+        </div>
+      </div>
+      <div id="lux-log-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+      <div style="opacity:.8;margin-top:8px;font-size:12px">Tip, click a chip to add it to the right log box.</div>
+    `;
+
+    // Insert it under replies list
+    ui.popup.appendChild(wrap);
+
+    wrap.querySelector('#lux-log-clear').addEventListener('click', () => {
+      const chips = wrap.querySelector('#lux-log-chips');
+      chips.innerHTML = '';
+    });
+
+    wrap.querySelector('#lux-log-applyall').addEventListener('click', () => {
+      const chips = wrap.querySelectorAll('.lux-log-chip');
+      const lines = [];
+      chips.forEach(c => {
+        const val = (c.getAttribute('data-value') || '').trim();
+        if (val) lines.push(val);
+      });
+      if (!lines.length) return notify('No facts to apply yet.');
+      lux_appendToLogTextarea(lines.join('\n'));
+    });
+  }
+
+  function lux_renderFactChips(facts) {
+    const panel = document.getElementById('lux-log-panel');
+    if (!panel) return;
+    const box = panel.querySelector('#lux-log-chips');
+    if (!box) return;
+    box.innerHTML = '';
+
+    function chip(label, value) {
+      if (!value) return;
+      const c = document.createElement('button');
+      c.className = 'lux-log-chip';
+      c.setAttribute('data-value', value);
+      c.textContent = label;
+      c.style.background = '#2b3545';
+      c.style.border = '1px solid #3c4c66';
+      c.style.color = '#cfe0ff';
+      c.style.borderRadius = '999px';
+      c.style.padding = '6px 10px';
+      c.style.cursor = 'pointer';
+      c.addEventListener('click', () => {
+        lux_appendToLogTextarea(value);
+      });
+      box.appendChild(c);
+    }
+
+    chip('Name', facts.name ? `Name: ${facts.name}` : '');
+    if (facts.role && facts.years) chip('Work', `Work: ${facts.role} (${facts.years} years)`);
+    else if (facts.role) chip('Work', `Work: ${facts.role}`);
+    if (facts.hobbies && facts.hobbies.length) chip('Hobbies', `Hobbies: ${facts.hobbies.join(', ')}`);
+  }
+
+  // ========= Integrate log chip refresh on new incoming customer message =========
+  // Poll for new last customer msg and refresh chips when it changes.
+  (function luxWatchLatestCustomer() {
+    let last = '';
+    let ticks = 0;
+    setInterval(() => {
+      ticks++;
+      const msg = getLatestCustomerMessage();
+      if (!msg) return;
+      if (msg === last) return;
+      last = msg;
+
+      // mount panel if needed
+      try { lux_mountLogPanel(); } catch {}
+
+      // compute facts and render
+      try {
+        const facts = parseClientFactsFromLatestMessage(msg);
+        lux_renderFactChips(facts);
+      } catch {}
+
+      // Also refresh chips bar time stamp occasionally
+      if (ticks % 8 === 0) {
+        try {
+          LUXPatch.UIChips.refresh({
+            modelLabel: (GM_getValue('lux_model', MODEL_DEFAULT) || 'default'),
+            countryLabel: parseProfileCountry() || '—'
+          });
+        } catch {}
+      }
+    }, 900);
+  })();
+
+  // ========= Hi/Hello fast responder =========
+  // If user only says hi/hello, we still generate something coherent quickly.
+  (function luxHelloGuard() {
+    const origCallBackend = callBackend;
+    callBackend = async function(msgText) {
+      const m = (msgText || '').trim();
+      const simple = m.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+      if (simple === 'hi' || simple === 'hello' || simple === 'hey' || simple === 'hi there' || simple === 'hello there') {
+        const left = parseLeftProfile();
+        const tc = buildTimeContext();
+        const name = (extractNameFromText(m) || '').trim();
+        const greet = [
+          `Hey${name ? ' ' + name : ''}, I saw your message and it made me smile.`,
+          `Hi${name ? ' ' + name : ''}, how's your day going so far?`,
+          `Hey${name ? ' ' + name : ''}, you're up early or I'm up late, either way I'm here.`,
+          `Hello${name ? ' ' + name : ''}, tell me something real about you.`,
+          `Hey${name ? ' ' + name : ''}, what pulled you onto my profile today?`
+        ];
+        const pick = greet[hashStr(tc.rawDayTime + tc.dayName) % greet.length];
+        const out = postFormat(pick);
+        showReplies([out]);
+        pushHist(m, out);
+        return;
+      }
+      return origCallBackend(m);
+    };
+  })();
+
+  // ========= Final sanity: keep UI stable =========
+  // Ensure popup has consistent styles if external CSS is messing with it.
+  (function luxHardenUI() {
+    const harden = () => {
+      try {
+        ui.popup.style.zIndex = '100000';
+        btn.style.zIndex = '99999';
+      } catch {}
+    };
+    setInterval(harden, 2000);
+  })();
+
+  console.log('[LUX] loaded full script with Part 4 patches');
+
+})(); // end IIFE
+/* =========================
+   END OF LUX FULL SCRIPT
+   ========================= */
