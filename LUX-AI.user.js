@@ -183,7 +183,8 @@ async function lux_ensureAccess() {
   const LUX_RATE_LOG_KEY = "lux_req_log_v1";
   const LUX_CREATIVE_STATE_KEY = "lux_creative_state_v1";
 
-  const LUX_HUMAN_REACTIONS = [
+ function luxHumanReaction(seed) {
+  const HUMAN_REACTIONS = [
     "That caught me off guard.",
     "Now that made me smile.",
     "I didn't expect you to say that.",
@@ -193,6 +194,36 @@ async function lux_ensureAccess() {
     "You have a way of saying things.",
     "That made me pause for a second."
   ];
+
+  const idx = Math.abs(hashStr(seed)) % HUMAN_REACTIONS.length;
+  return HUMAN_REACTIONS[idx];
+}
+
+function luxShouldAddReaction(userMsg, replyText) {
+
+  const u = String(userMsg || "").toLowerCase().trim();
+  const r = String(replyText || "").toLowerCase().trim();
+
+  if (!u || !r) return false;
+
+  if (/^(that caught me off guard|now that made me smile|i didn't expect you to say that|that actually sounds interesting|i can picture that|that pulled me in a little|you have a way of saying things|that made me pause for a second)\b/i.test(r)) {
+    return false;
+  }
+
+  if (/^(hi|hello|hey|heyy|yo|sup|good morning|good afternoon|good evening)\b/i.test(u)) {
+    return false;
+  }
+
+  if (/\b(number|contact|whatsapp|telegram|address|meet|meet up|available|free)\b/i.test(u)) {
+    return false;
+  }
+
+  if (/\b(confess|admit|miss you|thinking about you|lonely|divorce|widowed|lost|love|kiss|touch|naughty|dream|remember|memory|hurt|angry|upset|excited|curious|surprised|photo|picture)\b/i.test(u)) {
+    return true;
+  }
+
+  return false;
+}
 
   const LUX_CONVERSATION_THEMES = [
     "memory",
@@ -1216,10 +1247,6 @@ async function lux_ensureAccess() {
     return Array.from(banned).slice(0, 160);
   }
 
-  function luxHumanReaction(seedText = "") {
-    return pickByHash(LUX_HUMAN_REACTIONS, seedText || String(Date.now())) || "";
-  }
-
   function buildSystemPrompt(leftCard, customSystem, imageNotes) {
     const card = personaCardLine(leftCard) || "";
     const modelName = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim().toLowerCase();
@@ -2193,10 +2220,21 @@ async function lux_ensureAccess() {
       let content = raw;
       content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
 
-      const reaction = luxHumanReaction(`${rawMsg}|${chosenModel}`);
-      if (reaction && !/^\s*(that|i|you|now)\b/i.test(content)) {
-        content = `${reaction} ${content}`;
-      }
+     if (luxShouldAddReaction(rawMsg, content)) {
+
+  const reaction = luxHumanReaction(`${rawMsg}|${chosenModel}`);
+
+  const useAsOpener = Math.random() < 0.12;
+
+  if (reaction) {
+    if (useAsOpener) {
+      content = `${reaction} ${content}`;
+    } else {
+      content = `${content} ${reaction}`;
+    }
+  }
+
+}
 
       content = postFormat(content);
       content = content.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
