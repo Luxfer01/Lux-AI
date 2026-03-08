@@ -1,15 +1,13 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.3.0
-// @description  LUX upgraded: zero pools, anti-repeat CPE (phrase ban + similarity retry), smarter capitalization, better network empty-reply handling, fixed member-note to RIGHT box, cleaner fact logging, creative varied refusals.
+// @version      14.6.0
+// @description  LUX cleaned and upgraded: stricter PI logging, clearer male or female voice replies, stronger punctuation cleanup, richer curiosity themes, anti-template conversation flow, right-box member-note drafting, creative varied refusals.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_notification
 // @grant        GM_xmlhttpRequest
-// @connect      127.0.0.1
-// @connect      localhost
 // @connect      openrouter.ai
 // @connect      api.openrouter.ai
 // @connect      script.google.com
@@ -63,7 +61,7 @@ function lux_showErrorOverlay(msg) {
     title.textContent = "LUX connection issue";
     const body = document.createElement("div");
     body.id = "lux-error-body";
-    body.style.cssText = "font-size:14px;line-height:1.4;margin-bottom:16px;";
+    body.style.cssText = "font-size:14px;line-height:1.45;margin-bottom:16px;white-space:pre-wrap;";
     body.textContent = msg;
     const btn = document.createElement("button");
     btn.textContent = "Close";
@@ -101,18 +99,26 @@ function lux_getAccessCache() {
     const obj = JSON.parse(raw);
     if (!obj || !obj.coneId) return null;
     return obj;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 function lux_setAccessCache(data) {
-  try { GM_setValue(LUX_ACCESS_CACHE_KEY_V3, JSON.stringify(data || {})); }
-  catch (e) { console.warn("LUX access store error", e); }
+  try {
+    GM_setValue(LUX_ACCESS_CACHE_KEY_V3, JSON.stringify(data || {}));
+  } catch (e) {
+    console.warn("LUX access store error", e);
+  }
 }
 async function lux_ensureAccess() {
   let cache = lux_getAccessCache();
   let coneId = cache && cache.coneId;
   if (!coneId) {
     coneId = await lux_promptConeId();
-    if (!coneId) { lux_lockUI("no ConeID provided"); return false; }
+    if (!coneId) {
+      lux_lockUI("no ConeID provided");
+      return false;
+    }
     cache = { coneId };
   }
   const result = await lux_checkOnlineAccess(coneId);
@@ -122,12 +128,7 @@ async function lux_ensureAccess() {
     lux_lockUI(reason);
     return false;
   }
-  let expTs = null;
-  if (result.expires) {
-    const ts = new Date(result.expires + "T23:59:59").getTime();
-    if (!isNaN(ts)) expTs = ts;
-  }
-  lux_setAccessCache({ coneId, lastStatus: "allowed", lastCheckMs: Date.now(), expiresAt: expTs });
+  lux_setAccessCache({ coneId, lastStatus: "allowed", lastCheckMs: Date.now() });
   return true;
 }
 
@@ -138,14 +139,12 @@ async function lux_ensureAccess() {
   if (!accessOk) return;
 
   const API_URL_DEFAULT = "https://openrouter.ai/api/v1/chat/completions";
-  const OPENROUTER_KEY_DEFAULT = "";
-  const MODEL_DEFAULT = "x-ai/grok-4-fast";
-  const PROVIDER_DEFAULT = "openrouter";
   const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+  const MODEL_DEFAULT = "x-ai/grok-4-fast";
   const POLL_MS = 3000;
   const HISTORY_MAX = 14;
   const REQUEST_TIMEOUT_MS = 35000;
-
+  const MAX_CHARS = 800;
   const LUX_DEBUG_LOGGING = true;
   const LUX_NOTE_RETRY_DELAYS = [0, 500, 1200, 2200];
   const LUX_NOTE_AUTOSAVE = false;
@@ -153,6 +152,104 @@ async function lux_ensureAccess() {
   const LUX_SECRET = "lux_starr_secret_salt_v1";
   const LUX_API_KEY_ENC = "lux_openrouter_key_enc";
   const LUX_API_KEY_PLAIN_OLD = "lux_openrouter_key";
+
+  const REPLY_INPUT_SELECTOR = "textarea#reply-textarea.form-control.border-start-0.border-end-0";
+  const PERSONA_NAME_SEL = "h5.fw-bold.mb-1";
+  const PERSONA_LOC_SEL = "h6.text-black-50";
+  const PERSONA_COUNTRY_SEL = "div.col-auto.navbar-text.fw-bold.d-inline";
+  const THREAD_SEL = "div#message-list.flex-grow-1.overflow-auto.p-4";
+  const CLIENT_MSG_SELECTOR = "div.d-flex.flex-row-reverse.my-2.message-box";
+  const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
+  const MEMBER_TIME_SEL = "span#memberTime.fw-bold";
+  const AGE_SELECTOR = "td.p-1.ps-3.bg-light-subtle";
+  const MEMBER_NOTE_SAVE_SELECTOR = "button.btn.btn-secondary";
+  const LUX_NOTE_LAST_HASH_KEY = "lux_member_note_last_hash_v1";
+
+  const LUX_IMG_START = "LUX_IMG_NOTES_START";
+  const LUX_IMG_END = "LUX_IMG_NOTES_END";
+
+  const MODEL_FALLBACK_PRESET = { temperature: 0.58, top_p: 0.92, repetition_penalty: 1.02, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 11 };
+  const MODEL_PRESETS = {
+    "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
+    "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
+    "openai/gpt-4.1-mini": { temperature: 0.62, top_p: 0.94, repetition_penalty: 1.02, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 29 },
+    "meta-llama/llama-3.3-8b-instruct:free": { temperature: 0.74, top_p: 0.97, repetition_penalty: 1.04, max_tokens: 230, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 71 },
+    "meta-llama/llama-3.3-70b-instruct:free": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 250, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 83 },
+    "deepseek/deepseek-chat": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
+  };
+
+  const LUX_RATE_WINDOW_MS = 10000;
+  const LUX_RATE_MAX_REQ = 5;
+  const LUX_RATE_LOG_KEY = "lux_req_log_v1";
+  const LUX_CREATIVE_STATE_KEY = "lux_creative_state_v1";
+
+  const LUX_HUMAN_REACTIONS = [
+    "That caught me off guard.",
+    "Now that made me smile.",
+    "I didn't expect you to say that.",
+    "That actually sounds interesting.",
+    "I can picture that.",
+    "That pulled me in a little.",
+    "You have a way of saying things.",
+    "That made me pause for a second."
+  ];
+
+  const LUX_CONVERSATION_THEMES = [
+    "memory",
+    "curiosity",
+    "emotion",
+    "story",
+    "opinions",
+    "work",
+    "travel",
+    "food",
+    "music",
+    "relationships",
+    "values",
+    "life",
+    "future",
+    "humor",
+    "growth",
+    "beliefs",
+    "childhood",
+    "dreams"
+  ];
+
+  const LUX_VALID_HOBBIES = [
+    "cooking", "reading", "travel", "traveling", "hiking", "fishing", "gaming", "movies", "sports", "fitness",
+    "gym", "music", "photography", "drawing", "painting", "cycling", "running", "swimming", "camping",
+    "gardening", "watching movies", "playing music", "football", "basketball", "tennis", "biking",
+    "hunting", "writing", "baking"
+  ];
+
+  const LUX_VOICE_CACHE = {
+    voices: [],
+    ready: false
+  };
+
+  function luxDebug(...args) { if (LUX_DEBUG_LOGGING) console.log("[LUX DEBUG]", ...args); }
+  function notify(text) {
+    try { GM_notification({ text, title: "LUX", timeout: 3500 }); }
+    catch { console.log("[LUX]", text); }
+  }
+  function trimText(s, max) { s = (s || "").toString(); return s.length > max ? s.slice(0, max) + "..." : s; }
+  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  function _qs(r, s) { try { return s ? r.querySelector(s) : null; } catch { return null; } }
+  function _qst(r, s) { const el = _qs(r, s); return el ? el.innerText.trim() : ""; }
+
+  function hashStr(s) {
+    const str = String(s || "");
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0);
+  }
+  function pickByHash(options, seedStr) {
+    if (!options || !options.length) return "";
+    return options[hashStr(seedStr) % options.length];
+  }
 
   function lux_xorEncrypt(plainText, key = LUX_SECRET) {
     if (!plainText) return "";
@@ -183,34 +280,20 @@ async function lux_ensureAccess() {
     if (enc) return lux_xorDecrypt(enc);
     const legacy = GM_getValue(LUX_API_KEY_PLAIN_OLD, "").trim();
     if (legacy) {
-      const newEnc = lux_xorEncrypt(legacy);
-      GM_setValue(LUX_API_KEY_ENC, newEnc);
+      GM_setValue(LUX_API_KEY_ENC, lux_xorEncrypt(legacy));
       return legacy;
     }
-    return OPENROUTER_KEY_DEFAULT;
+    return "";
   }
   function lux_setApiKey(plainKey) {
-    const enc = lux_xorEncrypt(plainKey || "");
-    GM_setValue(LUX_API_KEY_ENC, enc);
+    GM_setValue(LUX_API_KEY_ENC, lux_xorEncrypt(plainKey || ""));
   }
 
-  const MODEL_FALLBACK_PRESET = { temperature: 0.58, top_p: 0.92, repetition_penalty: 1.02, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 11 };
-  const MODEL_PRESETS = {
-    "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
-    "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
-    "openai/gpt-4.1-mini": { temperature: 0.62, top_p: 0.94, repetition_penalty: 1.02, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 29 },
-    "meta-llama/llama-3.3-8b-instruct:free": { temperature: 0.74, top_p: 0.97, repetition_penalty: 1.04, max_tokens: 230, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 71 },
-    "meta-llama/llama-3.3-70b-instruct:free": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 250, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 83 },
-    "deepseek/deepseek-chat": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
-  };
   function getModelPreset(modelName) {
     const name = (modelName || GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
     return MODEL_PRESETS[name] || MODEL_FALLBACK_PRESET;
   }
 
-  const LUX_RATE_WINDOW_MS = 10000;
-  const LUX_RATE_MAX_REQ = 5;
-  const LUX_RATE_LOG_KEY = "lux_req_log_v1";
   function lux_getReqLog() { try { return JSON.parse(GM_getValue(LUX_RATE_LOG_KEY, "[]")) || []; } catch { return []; } }
   function lux_setReqLog(log) { GM_setValue(LUX_RATE_LOG_KEY, JSON.stringify(log || [])); }
   function lux_canSendRequest() {
@@ -225,180 +308,8 @@ async function lux_ensureAccess() {
     return true;
   }
   function lux_estimateTokens(str) { return !str ? 0 : Math.ceil(String(str).length / 4); }
-
-  const CREATIVE_BASE = 0.0;
-  const CREATIVE_MAX = 0.25;
-  const LUX_CREATIVE_STATE_KEY = "lux_creative_state_v1";
   function lux_getCreativeState() { try { return JSON.parse(GM_getValue(LUX_CREATIVE_STATE_KEY, "{}")) || {}; } catch { return {}; } }
   function lux_setCreativeState(state) { GM_setValue(LUX_CREATIVE_STATE_KEY, JSON.stringify(state || {})); }
-  function scoreCreativeIntent(text) {
-    const s = (text || "").toLowerCase();
-    let score = 0;
-    if (/\b(cute|adorable|pretty|gorgeous|fun|play|vibe|chemistry|smile|eyes|sweet)\b/.test(s)) score += 0.10;
-    if (/\b(pic|pics|picture|selfie|photo|gallery)\b/.test(s)) score += 0.08;
-    if (/\b(how.*day|what.*up|tell me about|you like|you enjoy)\b/.test(s)) score += 0.06;
-    if (/\b(fact|proof|specific|exact|details?|policy|rule|why|explain|clarify)\b/.test(s)) score -= 0.06;
-    if (/\b(meet|number|whatsapp|instagram|snap|telegram|address|call|text)\b/.test(s)) score -= 0.10;
-    score += CREATIVE_BASE;
-    return Math.max(-0.10, Math.min(CREATIVE_MAX, score));
-  }
-  function lux_getDaypart(date = new Date()) {
-    const hour = date.getHours();
-    if (hour < 5) return "late-night";
-    if (hour < 12) return "morning";
-    if (hour < 17) return "afternoon";
-    if (hour < 22) return "evening";
-    return "night";
-  }
-
-  function lux_detectTone(text) {
-    const s = (text || "").toLowerCase();
-    const angry = /\b(stupid|idiot|wtf|annoying|trash|nonsense|you never|you always|mad|angry|pissed)\b/.test(s);
-    const cold = /\b(k|ok|kay|fine|whatever|hm|hmm|sure)\b/.test(s) && s.replace(/\s+/g, " ").trim().length <= 20;
-    const playful = /\b(lol|lmao|haha|hehe)\b/.test(s);
-    const sweet = /\b(baby|babe|darling|sweetheart|dear|love|miss you|thinking of you)\b/.test(s);
-    const flirty = /\b(hot|cute|pretty|sexy|kiss|touch|naughty|turn on|bed|naked)\b/.test(s);
-    const serious = /\b(why|explain|honest|truth|seriously|real question|be straight)\b/.test(s);
-    const interviewy = /\b(what do you do|job|work|occupation|career|where are you from|how old|age)\b/.test(s);
-    const shortMsg = (s.replace(/\s+/g, " ").trim().length <= 12);
-    const questionHeavy = (s.match(/\?/g) || []).length >= 2;
-    let tone = "neutral";
-    if (angry) tone = "angry";
-    else if (flirty) tone = "flirty";
-    else if (sweet) tone = "sweet";
-    else if (serious || interviewy) tone = "serious";
-    else if (playful) tone = "playful";
-    else if (cold) tone = "cold";
-    const engagement = (cold || shortMsg) ? "low" : (questionHeavy ? "high" : "mid");
-    return { tone, engagement };
-  }
-
-  function lux_questionGuide(tone, engagement) {
-    const base = [
-      "End with exactly one open ended question that fits the flow and does not sound templated.",
-      "The question must feel interesting, engaging, and easy to reply to.",
-      "Avoid dull questions like how was your day, what are you up to, tell me about yourself, or what do you like to do.",
-      "Prefer curiosity, imagination, chemistry, contrast, opinions, little confessions, preferences, memories, or playful what if questions.",
-      "The question should make the person want to answer, not feel interviewed."
-    ].join(" ");
-    if (tone === "angry") return base + " Their tone is tense, be calm and de escalating, ask a soft question that helps them explain what really bothered them.";
-    if (tone === "cold") return base + " Their tone is dry, use a light hook and ask something easy but still interesting, like a preference, mood, or little choice question that feels personal.";
-    if (tone === "serious") return base + " Their tone is serious, ask something thoughtful that invites specifics, perspective, or a real opinion, not a flat generic question.";
-    if (tone === "sweet") return base + " Their tone is affectionate, ask a warm feeling based question that deepens closeness, like what they miss, what softens them, or what kind of affection gets to them.";
-    if (tone === "flirty") return base + " Their tone is teasing, ask a playful chemistry question that builds tension on platform, like what about a woman catches their attention first, what kind of teasing they enjoy, or what kind of kiss would ruin their focus.";
-    if (tone === "playful") return base + " Their tone is playful, ask something imaginative, cheeky, or unexpected that sparks banter and makes replying fun.";
-    if (engagement === "low") return base + " Keep the question easy to answer, but still interesting, like a choice between two tempting options or a small revealing preference.";
-    return base + " Make the question vivid, specific, and a little magnetic.";
-  }
-
-  function lux_toneKey() { try { return _threadKey() + "__tone_v1"; } catch { return "lux_tone_global_v1"; } }
-  function lux_getToneMemory() { try { const raw = GM_getValue(lux_toneKey(), "[]"); const arr = JSON.parse(raw); return Array.isArray(arr) ? arr.slice(-3) : []; } catch { return []; } }
-  function lux_pushToneMemory(item) {
-    try {
-      const arr = lux_getToneMemory();
-      arr.push(item);
-      while (arr.length > 3) arr.shift();
-      GM_setValue(lux_toneKey(), JSON.stringify(arr));
-    } catch {}
-  }
-
-  function withCreativeBoost(base, msg) {
-    const state = lux_getCreativeState();
-    const history = state.history || [];
-    const score = scoreCreativeIntent(msg);
-    history.push(score);
-    if (history.length > 5) history.shift();
-    const highCount = history.filter(s => s >= 0.10).length;
-
-    let temperature = base.temperature ?? 0.7;
-    let top_p = base.top_p ?? 0.9;
-    let repetition_penalty = base.repetition_penalty ?? 1.02;
-    let max_tokens = base.max_tokens ?? 240;
-
-    const daypart = lux_getDaypart();
-    if (daypart === "late-night" || daypart === "night") temperature = Math.min(temperature + 0.05, 1.2);
-    else if (daypart === "morning") temperature = Math.max(temperature - 0.05, 0.45);
-
-    const toneNow = lux_detectTone(msg);
-    const mem = lux_getToneMemory();
-    const lastTone = mem.length ? mem[mem.length - 1].tone : "neutral";
-    const coldStreak = mem.filter(x => x && x.tone === "cold").length >= 2;
-    const tone = toneNow.tone;
-    const engagement = toneNow.engagement;
-
-    if (tone === "flirty") {
-      temperature = Math.min(temperature + 0.08, 1.15);
-      top_p = Math.min(top_p + 0.03, 1.0);
-      repetition_penalty = Math.max(1.00, repetition_penalty - 0.01);
-      max_tokens = Math.min(280, max_tokens + 20);
-    } else if (tone === "sweet") {
-      temperature = Math.min(temperature + 0.05, 1.08);
-      top_p = Math.min(top_p + 0.02, 1.0);
-      repetition_penalty = Math.max(1.00, repetition_penalty - 0.01);
-      max_tokens = Math.min(280, max_tokens + 15);
-    } else if (tone === "serious") {
-      temperature = Math.max(0.48, temperature - 0.08);
-      top_p = Math.max(0.86, top_p - 0.05);
-      repetition_penalty = Math.min(1.06, repetition_penalty + 0.02);
-      max_tokens = Math.max(200, max_tokens - 10);
-    } else if (tone === "angry") {
-      temperature = Math.max(0.46, temperature - 0.10);
-      top_p = Math.max(0.84, top_p - 0.06);
-      repetition_penalty = Math.min(1.06, repetition_penalty + 0.02);
-      max_tokens = Math.max(190, max_tokens - 20);
-    } else if (tone === "cold") {
-      temperature = Math.min(temperature + 0.03, 0.95);
-      top_p = Math.min(top_p + 0.02, 0.98);
-      max_tokens = Math.max(180, Math.min(230, max_tokens - 20));
-    }
-
-    if (coldStreak && tone !== "serious" && tone !== "angry") {
-      temperature = Math.min(temperature + 0.03, 1.05);
-      top_p = Math.min(top_p + 0.02, 1.0);
-      max_tokens = Math.min(280, max_tokens + 10);
-    }
-
-    if (highCount >= 3) {
-      temperature = Math.min(temperature + 0.12, 1.2);
-      top_p = Math.min(top_p + 0.05, 1.0);
-    } else if (highCount >= 1) {
-      temperature = Math.min(temperature + 0.05, 1.1);
-    } else {
-      temperature = temperature * 0.9 + (base.temperature ?? 0.7) * 0.1;
-      top_p = top_p * 0.9 + (base.top_p ?? 0.9) * 0.1;
-    }
-
-    lux_setCreativeState({ history, lastTone: tone, lastEngagement: engagement, prevTone: lastTone });
-    lux_pushToneMemory({ tone, engagement, ts: Date.now() });
-    return { ...base, temperature, top_p, repetition_penalty, max_tokens };
-  }
-
-  function sanitizePayloadForModel(payload, model) {
-    const m = (model || "").toLowerCase();
-    const p = { ...payload };
-    if ("transforms" in p) delete p.transforms;
-    if ("logit_bias" in p && !p.logit_bias) delete p.logit_bias;
-    if (m.includes("llama-3.2-3b") && p.max_tokens > 260) p.max_tokens = 220;
-    return p;
-  }
-
-  const REPLY_INPUT_SELECTOR = "textarea#reply-textarea.form-control.border-start-0.border-end-0";
-  const PERSONA_NAME_SEL = "h5.fw-bold.mb-1";
-  const PERSONA_LOC_SEL = "h6.text-black-50";
-  const PERSONA_COUNTRY_SEL = "div.col-auto.navbar-text.fw-bold.d-inline";
-  const THREAD_SEL = "div#message-list.flex-grow-1.overflow-auto.p-4";
-  const CLIENT_MSG_SELECTOR = "div.d-flex.flex-row-reverse.my-2.message-box";
-  const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
-  const MEMBER_TIME_SEL = "span#memberTime.fw-bold";
-  const AGE_SELECTOR = "td.p-1.ps-3.bg-light-subtle";
-  const MEMBER_NOTE_SELECTOR = "textarea#log.form-control.mb-2.text-bg-light";
-  const MEMBER_NOTE_SAVE_SELECTOR = "button.btn.btn-secondary";
-  const LUX_NOTE_LAST_HASH_KEY = "lux_member_note_last_hash_v1";
-
-  function _qs(r, s) { try { return s ? r.querySelector(s) : null; } catch { return null; } }
-  function _qst(r, s) { const el = _qs(r, s); return el ? el.innerText.trim() : ""; }
-  function extractBracketName(s) { if (!s) return ""; let m = s.match(/\(([^()]*)\)\s*$/); if (!m) m = s.match(/\(([^)]+)\)/); return (m && m[1]) ? m[1].trim() : ""; }
-  function cleanOutsideName(s) { if (!s) return ""; return s.replace(/\s*\([^)]*\)\s*/g, "").trim(); }
 
   function parseAgeFromProfile() {
     try {
@@ -409,7 +320,20 @@ async function lux_ensureAccess() {
       const n = parseInt(m[1], 10);
       if (!Number.isFinite(n) || n < 18 || n > 100) return null;
       return n;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
+  }
+
+  function extractBracketName(s) {
+    if (!s) return "";
+    let m = s.match(/\(([^()]*)\)\s*$/);
+    if (!m) m = s.match(/\(([^)]+)\)/);
+    return (m && m[1]) ? m[1].trim() : "";
+  }
+  function cleanOutsideName(s) {
+    if (!s) return "";
+    return s.replace(/\s*\([^)]*\)\s*/g, "").trim();
   }
 
   function parseProfileCountry() {
@@ -430,18 +354,6 @@ async function lux_ensureAccess() {
     if (c === "australia") return "Write in relaxed, natural Australian English. Keep it feminine, playful, easygoing, and clear without overusing slang.";
     if (c === "great britain") return "Write in soft, natural British English. Keep it polished, feminine, and conversational without sounding stiff.";
     return "Write in natural, warm, feminine English.";
-  }
-
-  function hashStr(s) {
-    const str = String(s || "");
-    let h = 2166136261;
-    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-    return (h >>> 0);
-  }
-  function pickByHash(options, seedStr) {
-    if (!options || !options.length) return "";
-    const h = hashStr(seedStr);
-    return options[h % options.length];
   }
 
   function jobOptionsForAge(age) {
@@ -520,8 +432,6 @@ async function lux_ensureAccess() {
     return t;
   }
 
-  const LUX_IMG_START = "LUX_IMG_NOTES_START";
-  const LUX_IMG_END = "LUX_IMG_NOTES_END";
   function stripLuxImageMeta(s) {
     if (!s) return "";
     const rx = new RegExp(`${LUX_IMG_START}[\\s\\S]*?${LUX_IMG_END}`, "gi");
@@ -590,14 +500,6 @@ async function lux_ensureAccess() {
     return bits.length ? ` Persona card, ${bits.join(", ")}.` : "";
   }
 
-  function notify(text) {
-    try { GM_notification({ text, title: "LUX", timeout: 3500 }); }
-    catch { console.log("[LUX]", text); }
-  }
-  function trimText(s, max) { s = (s || "").toString(); return s.length > max ? s.slice(0, max) + "..." : s; }
-  function luxDebug(...args) { if (LUX_DEBUG_LOGGING) console.log("[LUX DEBUG]", ...args); }
-
-  const MAX_CHARS = 800;
   function clampToLimit(s, max = MAX_CHARS) {
     let t = (s || "").trim();
     if (t.length <= max) return t;
@@ -662,8 +564,20 @@ async function lux_ensureAccess() {
   function splitCsvLike(value) {
     return String(value || "").split(/,|\band\b|\&|\//i).map(x => normalizeLooseText(x)).filter(Boolean);
   }
+
+  function luxTrimAnswerTail(v) {
+    let t = String(v || "").trim();
+    t = t.replace(/\s+/g, " ").trim();
+    t = t.split(/\b(?:and you|what about you|how about you|you\?|wbu|hbu)\b/i)[0];
+    t = t.split(/\b(?:by the way|btw)\b/i)[0];
+    t = t.split(/[!?]/)[0];
+    t = t.replace(/\b(?:if that makes sense|i guess|i think|you know)\b.*$/i, "");
+    t = t.replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "").trim();
+    return t;
+  }
+
   function cleanupNoteValue(v) {
-    let t = normalizeLooseText(v);
+    let t = luxTrimAnswerTail(v);
     t = t.replace(/^that\s+/i, "");
     t = t.replace(/^is\s+/i, "");
     t = t.replace(/^i\s+(?:am|m)\s+/i, "");
@@ -672,9 +586,40 @@ async function lux_ensureAccess() {
     t = t.replace(/^i\s+work\s+for\s+/i, "");
     t = t.replace(/^i\s+live\s+in\s+/i, "");
     t = t.replace(/^i\s+live\s+at\s+/i, "");
+    t = t.replace(/^i\s+am\s+from\s+/i, "");
+    t = t.replace(/^i'?m\s+from\s+/i, "");
     t = t.replace(/^my\s+name\s+is\s+/i, "");
+    t = t.replace(/^call\s+me\s+/i, "");
+    t = t.replace(/^you\s+can\s+call\s+me\s+/i, "");
     return normalizeLooseText(t);
   }
+
+  function luxCleanNameValue(v) {
+    let t = cleanupNoteValue(v);
+    t = t.split(/\b(?:and|but|so)\b/i)[0].trim();
+    t = t.replace(/[^A-Za-z'\-\s]/g, "").trim();
+    return t;
+  }
+
+  function luxCleanLocationValue(v) {
+    let t = cleanupNoteValue(v);
+    t = t.split(/\b(?:and|but|so|because|while)\b/i)[0].trim();
+    t = t.replace(/\b(?:you|u)\b\s*$/i, "").trim();
+    t = t.replace(/[^A-Za-z0-9\s,\-]/g, "").trim();
+    return normalizeLooseText(t);
+  }
+
+  function luxCleanJobValue(v) {
+    let t = cleanupNoteValue(v);
+    t = t.split(/\b(?:and|but|so|because)\b/i)[0].trim();
+    t = t.replace(/[^A-Za-z0-9\s,&\-]/g, "").trim();
+    return normalizeLooseText(t);
+  }
+
+  function luxCleanSimpleValue(v) {
+    return normalizeLooseText(cleanupNoteValue(v));
+  }
+
   function extractFirst(text, regexes, cleaner) {
     for (const re of regexes) {
       const m = text.match(re);
@@ -696,6 +641,7 @@ async function lux_ensureAccess() {
     }
     return dedupeCsvItems(out);
   }
+
   function looksLikeNameCandidate(v) {
     const s = normalizeLooseText(v);
     if (!s) return false;
@@ -710,11 +656,9 @@ async function lux_ensureAccess() {
     let v = normalizeLooseText(value);
     if (!v) return "";
 
-    // block raw explicit phrases from notes
     const explicit = /\b(fuck|fucking|pussy|dick|cock|blowjob|anal|cum|cumming|horny|hard\s+on|suck|tits|boobs)\b/i;
     if (explicit.test(v)) return "";
 
-    // clean preference summaries
     if (k === "preferences" || k === "sexual preferences" || k === "preference") {
       if (/\bdominant\b/i.test(v)) return "Prefers dominant partner";
       if (/\bsubmissive\b/i.test(v)) return "Prefers submissive partner";
@@ -726,6 +670,13 @@ async function lux_ensureAccess() {
     }
 
     return v;
+  }
+
+  function isValidHobbyValue(v) {
+    const s = normalizeLooseText(v).toLowerCase();
+    if (!s) return false;
+    if (/\b(boobs?|tits?|ass|white women|white girls|black girls|latinas?|asians?|milfs?|sex|fucking|nudes?)\b/i.test(s)) return false;
+    return LUX_VALID_HOBBIES.some(h => s.includes(h));
   }
 
   function parseClientFactsFromLatestMessage(messageText) {
@@ -740,9 +691,8 @@ async function lux_ensureAccess() {
       /\bi(?:'m|\s+am)\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
       /\bthis\s+is\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
       /\bcall\s+me\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
-      /\byou\s+can\s+call\s+me\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
-      /\b([A-Z][a-z'\-]{1,30})\s+here\b/i
-    ], cleanupNoteValue);
+      /\byou\s+can\s+call\s+me\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i
+    ], luxCleanNameValue);
     if (name && looksLikeNameCandidate(name)) facts.Name = name;
 
     const age = extractFirst(text, [
@@ -757,13 +707,14 @@ async function lux_ensureAccess() {
     if (age) facts.Age = age;
 
     const location = extractFirst(text, [
-      /\bi\s+live\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})\b/i,
-      /\bi\s+am\s+from\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})\b/i,
-      /\bi\s+live\s+at\s+([A-Za-z0-9][A-Za-z0-9\s,\-#\.]{3,80})\b/i,
-      /\bmy\s+address\s+is\s+([A-Za-z0-9][A-Za-z0-9\s,\-#\.]{3,100})\b/i,
-      /\bi\s+stay\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})\b/i,
-      /\bi'?m\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})\b/i
-    ], v => cleanupNoteValue(v).replace(/[\.,]+$/g, ""));
+      /\bi\s+live\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})/i,
+      /\bi\s+am\s+from\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})/i,
+      /\bi'?m\s+from\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})/i,
+      /\bi'?m\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})/i,
+      /\bi\s+stay\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})/i,
+      /\bmy\s+address\s+is\s+([A-Za-z0-9][A-Za-z0-9\s,\-#\.]{3,100})/i
+    ], luxCleanLocationValue);
+
     if (location) {
       if (/\d/.test(location) && /(street|st\b|road|rd\b|avenue|ave\b|apartment|apt\b|house|close|crescent|lane|drive|dr\b|boulevard|blvd\b)/i.test(location)) facts.Address = location;
       else facts.Location = location;
@@ -777,7 +728,7 @@ async function lux_ensureAccess() {
       /\bi\s+work\s+for\s+([^\.,!?]{2,80})/i,
       /\bi\s+served\s+as\s+(?:a\s+|an\s+)?([^\.,!?]{2,80})/i,
       /\bi\s+am\s+retired\s+from\s+([^\.,!?]{2,80})/i
-    ], cleanupNoteValue);
+    ], luxCleanJobValue);
     if (job && !/^(here|there|single|married|busy|ready|okay|ok|fine)$/i.test(job)) facts.Job = job;
 
     const workplace = extractFirst(text, [
@@ -786,7 +737,7 @@ async function lux_ensureAccess() {
       /\bi'?ve\s+been\s+with\s+([^\.,!?]{2,80})/i,
       /\bi\s+am\s+with\s+([^\.,!?]{2,80})/i,
       /\bi'?m\s+with\s+([^\.,!?]{2,80})/i
-    ], cleanupNoteValue);
+    ], luxCleanJobValue);
     if (workplace) facts.Workplace = workplace;
 
     const experience = extractFirst(text, [
@@ -795,14 +746,14 @@ async function lux_ensureAccess() {
       /\babout\s+(\d+\s+years?)\b/i,
       /\b(\d+\s+years?)\s+now\b/i,
       /\bworked\s+(?:there\s+)?for\s+(\d+\s+years?)\b/i
-    ], cleanupNoteValue);
+    ], luxCleanSimpleValue);
     if (experience) facts.Experience = experience;
 
     const status = extractFirst(text, [
       /\bi(?:'m|\s+am)\s+(single|divorced|widowed|separated|married)\b/i,
       /\bI'm\s+a\s+(single\s+(?:dad|mom|father|mother))\b/i,
       /\bI\s+am\s+a\s+(single\s+(?:dad|mom|father|mother))\b/i
-    ], cleanupNoteValue);
+    ], luxCleanSimpleValue);
     if (status) facts.Status = status;
 
     const family = extractFirst(text, [
@@ -810,34 +761,41 @@ async function lux_ensureAccess() {
       /\bi\s+have\s+(\d+\s+(?:kids|children|sons|daughters))\b/i,
       /\bi'?m\s+a\s+(single\s+(?:dad|mom|father|mother))\b/i,
       /\bmy\s+(?:son|daughter|kids|children|mom|mother|dad|father|parents?)\b[^\.!?]{0,60}/i
-    ], cleanupNoteValue);
+    ], luxCleanSimpleValue);
     if (family) facts.Family = family;
 
-    const hobbies = extractMany(text, [
+    const hobbyMatches = extractMany(text, [
       /\bi\s+like\s+([^\.!?]{2,90})/i,
       /\bi\s+love\s+([^\.!?]{2,90})/i,
       /\bmy\s+hobbies\s+are\s+([^\.!?]{2,90})/i,
       /\bi\s+enjoy\s+([^\.!?]{2,90})/i,
       /\bin\s+my\s+free\s+time\s+i\s+([^\.!?]{2,90})/i
-    ]).filter(x => !/^(you|this|that|it|here|there)$/i.test(x));
-    if (hobbies.length) facts.Hobbies = hobbies.join(", ");
+    ]).map(luxCleanSimpleValue);
+
+    const hobbies = hobbyMatches.filter(isValidHobbyValue);
+    if (hobbies.length) facts.Hobbies = dedupeCsvItems(hobbies).join(", ");
 
     const activities = extractMany(text, [
       /\bi\s+(?:usually|often|normally)\s+([^\.!?]{2,90})/i,
       /\bright\s+now\s+i'?m\s+([^\.!?]{2,90})/i,
       /\bi'?m\s+currently\s+([^\.!?]{2,90})/i,
       /\bi\s+spend\s+my\s+time\s+([^\.!?]{2,90})/i
-    ]);
-    if (activities.length) facts.Activity = activities.join(", ");
+    ]).map(luxCleanSimpleValue).filter(x => {
+      if (!x) return false;
+      if (/\b(boobs?|tits?|sex|nudes?|white women|black women)\b/i.test(x)) return false;
+      if (/^(and you|what about you|you)$/i.test(x)) return false;
+      return true;
+    });
+    if (activities.length) facts.Activity = dedupeCsvItems(activities).join(", ");
 
     const schedule = extractFirst(text, [
       /\bi\s+work\s+(nights|days|weekends|night shifts|day shifts)\b/i,
-      /\bi\s+have\s+(?:an\s+)?appointment\s+([^\.!?]{2,80})/i,
-      /\bi\s+am\s+free\s+([^\.!?]{2,80})/i,
-      /\bi\s+usually\s+work\s+([^\.!?]{2,80})/i,
-      /\btomorrow\s+i\s+([^\.!?]{2,80})/i,
-      /\bthis\s+(?:week|weekend|evening|morning)\s+i\s+([^\.!?]{2,80})/i
-    ], cleanupNoteValue);
+      /\bi\s+have\s+(?:an\s+)?appointment\s+([^\.,!?]{2,80})/i,
+      /\bi\s+am\s+free\s+([^\.,!?]{2,80})/i,
+      /\bi\s+usually\s+work\s+([^\.,!?]{2,80})/i,
+      /\btomorrow\s+i\s+([^\.,!?]{2,80})/i,
+      /\bthis\s+(?:week|weekend|evening|morning)\s+i\s+([^\.,!?]{2,80})/i
+    ], luxCleanSimpleValue);
     if (schedule) facts.Schedule = schedule;
 
     const contact = extractFirst(text, [
@@ -845,16 +803,16 @@ async function lux_ensureAccess() {
       /\breach\s+me\s+at\s+([+\d\s\-()]{6,30})\b/i,
       /\bwhatsapp\s+me\s+at\s+([+\d\s\-()]{6,30})\b/i,
       /\bmy\s+email\s+is\s+([^\s,;]+@[^\s,;]+)\b/i
-    ], cleanupNoteValue);
+    ], luxCleanSimpleValue);
     if (contact) facts.Contact = contact;
     if (/\bwhatsapp|telegram|snap(?:chat)?|instagram|ig\b/i.test(lower) && !facts.Contact) facts.ContactAttempt = "asked to move chat off site";
 
     const plan = extractFirst(text, [
-      /\bi\s+plan\s+to\s+([^\.!?]{2,80})/i,
-      /\bi'?m\s+going\s+to\s+([^\.!?]{2,80})/i,
-      /\bi\s+want\s+to\s+([^\.!?]{2,80})/i,
-      /\bnext\s+week\s+i\s+([^\.!?]{2,80})/i
-    ], cleanupNoteValue);
+      /\bi\s+plan\s+to\s+([^\.,!?]{2,80})/i,
+      /\bi'?m\s+going\s+to\s+([^\.,!?]{2,80})/i,
+      /\bi\s+want\s+to\s+([^\.,!?]{2,80})/i,
+      /\bnext\s+week\s+i\s+([^\.,!?]{2,80})/i
+    ], luxCleanSimpleValue);
     if (plan) facts.Plans = plan;
 
     const prefs = extractFirst(text, [
@@ -862,7 +820,7 @@ async function lux_ensureAccess() {
       /\bi\s+(?:like|prefer)\s+(?:a\s+)?(dominant|submissive)\b/i,
       /\bi'?m\s+into\s+(role\s*play|roleplay|kink(?:y)?)\b/i,
       /\bi\s+like\s+it\s+(rough|gentle)\b/i
-    ], cleanupNoteValue);
+    ], luxCleanSimpleValue);
     if (prefs) facts.Preferences = prefs;
 
     const fields = Object.entries(facts).filter(([, v]) => normalizeLooseText(v));
@@ -915,12 +873,11 @@ async function lux_ensureAccess() {
   function formatMemberNote(obj) {
     const order = ["Name", "Age", "Location", "Address", "Job", "Workplace", "Experience", "Status", "Family", "Hobbies", "Activity", "Schedule", "Plans", "Preferences", "Contact", "ContactAttempt"];
     const parts = [];
-    for (const key of order) { if (obj && obj[key]) parts.push(`${key}: ${normalizeLooseText(obj[key])}`); }
-    for (const [k, v] of Object.entries(obj || {})) { if (!order.includes(k) && normalizeLooseText(v)) parts.push(`${k}: ${normalizeLooseText(v)}`); }
+    for (const key of order) if (obj && obj[key]) parts.push(`${key}: ${normalizeLooseText(obj[key])}`);
+    for (const [k, v] of Object.entries(obj || {})) if (!order.includes(k) && normalizeLooseText(v)) parts.push(`${k}: ${normalizeLooseText(v)}`);
     return parts.join(" | ");
   }
 
-  // RIGHT-side visible note textarea selector (fixes filling left box)
   function memberNoteTextarea() {
     const all = [...document.querySelectorAll("textarea#log.form-control.mb-2.text-bg-light, textarea#log")];
     if (!all.length) return null;
@@ -938,7 +895,6 @@ async function lux_ensureAccess() {
     return (rightSide[0] || visible[visible.length - 1] || visible[0] || null);
   }
 
-  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
   async function waitForMemberNoteTextarea(timeoutMs = 2500) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
@@ -948,6 +904,7 @@ async function lux_ensureAccess() {
     }
     return null;
   }
+
   function memberNoteSaveButton() {
     const buttons = [...document.querySelectorAll(MEMBER_NOTE_SAVE_SELECTOR)];
     if (!buttons.length) return null;
@@ -963,6 +920,7 @@ async function lux_ensureAccess() {
     else if (protoDesc && protoDesc.set) protoDesc.set.call(el, value);
     else el.value = value;
   }
+
   function fireFieldEvents(el) {
     if (!el) return;
     const opts = { bubbles: true, cancelable: true };
@@ -977,6 +935,7 @@ async function lux_ensureAccess() {
     try { el.dispatchEvent(new KeyboardEvent("keyup", { key: " ", code: "Space", bubbles: true })); } catch {}
     try { el.dispatchEvent(new FocusEvent("blur", opts)); } catch { el.dispatchEvent(new Event("blur", opts)); }
   }
+
   function forceClick(el) {
     if (!el) return false;
     try { el.scrollIntoView({ block: "nearest" }); } catch {}
@@ -1025,7 +984,11 @@ async function lux_ensureAccess() {
 
       if (LUX_NOTE_AUTOSAVE) {
         const saveBtn = memberNoteSaveButton();
-        if (saveBtn) { forceClick(saveBtn); await sleep(120); forceClick(saveBtn); }
+        if (saveBtn) {
+          forceClick(saveBtn);
+          await sleep(120);
+          forceClick(saveBtn);
+        }
         notify("LUX logged member note");
       } else {
         notify("LUX drafted member note");
@@ -1037,177 +1000,336 @@ async function lux_ensureAccess() {
     }
   }
 
-  const css = document.createElement("style");
-  css.textContent = `#lux-btn{position:fixed;bottom:20px;right:20px;z-index:99999;background:#0b3d91;color:#fff;border:0;padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(11,61,145,.3)}#lux-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:820px;max-width:98vw;max-height:84vh;overflow:auto;background:#1f1f1f;color:#eee;border:2px solid #0b3d91;border-radius:14px;padding:14px;z-index:100000;display:none;font-family:system-ui,sans-serif}#lux-responses{display:flex;flex-direction:column;gap:8px}.lux-reply{white-space:pre-wrap;border:1px solid #3a4155;border-radius:10px;padding:10px;background:#252525;color:#eaeaea;cursor:pointer}#lux-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}#lux-actions button{flex:1 1 150px}#lux-settings-panel{display:none;margin-top:8px;border:1px solid #3a4155;border-radius:8px;padding:8px;background:#222;color:#eaeaea}#lux-settings-panel input[type=text],#lux-settings-panel textarea{width:100%;padding:6px;border:1px solid #3a4155;background:#1a1a1a;color:#eaeaea;border-radius:6px;margin:4px 0}#lux-models{background:#2b3545;color:#bcd7ff;border:0;border-radius:8px;padding:8px 10px;font-weight:700}#lux-models-panel{display:none;margin-top:8px;border:1px dashed #3c4c66;border-radius:8px;padding:8px}#lux-models-panel .lux-model{margin:4px;padding:6px 10px;border:1px solid #3c4c66;border-radius:8px;background:#1f2937;color:#cfe0ff;cursor:pointer}#lux-models-panel .lux-tag{display:inline-block;background:#0b3d91;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px}`;
-  document.head.appendChild(css);
+  function scoreCreativeIntent(text) {
+    const s = (text || "").toLowerCase();
+    let score = 0;
+    if (/\b(cute|adorable|pretty|gorgeous|fun|play|vibe|chemistry|smile|eyes|sweet)\b/.test(s)) score += 0.10;
+    if (/\b(pic|pics|picture|selfie|photo|gallery)\b/.test(s)) score += 0.08;
+    if (/\b(how.*day|what.*up|tell me about|you like|you enjoy)\b/.test(s)) score += 0.06;
+    if (/\b(fact|proof|specific|exact|details?|policy|rule|why|explain|clarify)\b/.test(s)) score -= 0.06;
+    if (/\b(meet|number|whatsapp|instagram|snap|telegram|address|call|text)\b/.test(s)) score -= 0.10;
+    return Math.max(-0.10, Math.min(0.25, score));
+  }
 
-  const btn = document.createElement("button");
-  btn.id = "lux-btn";
-  btn.textContent = "LUX";
-  document.body.appendChild(btn);
+  function lux_getDaypart(date = new Date()) {
+    const hour = date.getHours();
+    if (hour < 5) return "late-night";
+    if (hour < 12) return "morning";
+    if (hour < 17) return "afternoon";
+    if (hour < 22) return "evening";
+    return "night";
+  }
 
-  const pop = document.createElement("div");
-  pop.id = "lux-popup";
-  pop.innerHTML = `
-  <div id="lux-topbar" style="margin-bottom:8px"></div>
-  <textarea id="lux-customer" placeholder="Latest customer message" style="width:100%;min-height:96px;border:1px solid #3a4155;background:#2a2a2a;color:#fff;border-radius:8px;padding:8px;margin:8px 0"></textarea>
-  <div id="lux-responses"></div>
-  <div id="lux-actions">
-    <button id="lux-send" style="background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Send</button>
-    <button id="lux-regen" style="background:#113a6b;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Regenerate</button>
-    <button id="lux-models">Models</button>
-    <button id="lux-settings" style="background:#303741;color:#eaeaea;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Settings</button>
-    <button id="lux-close" style="background:#303741;color:#eaeaea;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Close</button>
-  </div>
-  <div id="lux-models-panel"></div>
-  <div id="lux-settings-panel">
-    <div><strong>Backend URL</strong></div><input type="text" id="lux-api-url">
-    <div><strong>OpenRouter API Key</strong></div><input type="text" id="lux-api-key">
-    <div><strong>Model</strong></div><input type="text" id="lux-model">
-    <div><strong>Provider</strong></div><input type="text" id="lux-provider">
-    <div><strong>Custom Persona (optional)</strong></div><textarea id="lux-persona"></textarea>
-    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:4px">
-      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" id="lux-excuse-via-model" checked> Use model for creative refusals</label>
-      <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" id="lux-filter-enabled"> Enable explicit filter</label>
-    </div>
-    <button id="lux-save" style="margin-top:6px;background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:6px 10px;font-weight:700">Save</button>
-  </div>`;
-  document.body.appendChild(pop);
+  function lux_detectTone(text) {
+    const s = (text || "").toLowerCase();
+    const angry = /\b(stupid|idiot|wtf|annoying|trash|nonsense|you never|you always|mad|angry|pissed)\b/.test(s);
+    const cold = /\b(k|ok|kay|fine|whatever|hm|hmm|sure)\b/.test(s) && s.replace(/\s+/g, " ").trim().length <= 20;
+    const playful = /\b(lol|lmao|haha|hehe)\b/.test(s);
+    const sweet = /\b(baby|babe|darling|sweetheart|dear|love|miss you|thinking of you)\b/.test(s);
+    const flirty = /\b(hot|cute|pretty|kiss|touch|naughty|turn on)\b/.test(s);
+    const serious = /\b(why|explain|honest|truth|seriously|real question|be straight)\b/.test(s);
+    const interviewy = /\b(what do you do|job|work|occupation|career|where are you from|how old|age)\b/.test(s);
+    const shortMsg = (s.replace(/\s+/g, " ").trim().length <= 12);
+    const questionHeavy = (s.match(/\?/g) || []).length >= 2;
+    let tone = "neutral";
+    if (angry) tone = "angry";
+    else if (flirty) tone = "flirty";
+    else if (sweet) tone = "sweet";
+    else if (serious || interviewy) tone = "serious";
+    else if (playful) tone = "playful";
+    else if (cold) tone = "cold";
+    const engagement = (cold || shortMsg) ? "low" : (questionHeavy ? "high" : "mid");
+    return { tone, engagement };
+  }
 
-  const ui = {
-    popup: pop,
-    topbar: pop.querySelector("#lux-topbar"),
-    customer: pop.querySelector("#lux-customer"),
-    list: pop.querySelector("#lux-responses"),
-    send: pop.querySelector("#lux-send"),
-    regen: pop.querySelector("#lux-regen"),
-    models: pop.querySelector("#lux-models"),
-    modelsPanel: pop.querySelector("#lux-models-panel"),
-    settings: pop.querySelector("#lux-settings"),
-    close: pop.querySelector("#lux-close"),
-    panel: pop.querySelector("#lux-settings-panel"),
-    apiUrl: pop.querySelector("#lux-api-url"),
-    apiKey: pop.querySelector("#lux-api-key"),
-    model: pop.querySelector("#lux-model"),
-    provider: pop.querySelector("#lux-provider"),
-    persona: pop.querySelector("#lux-persona"),
-    excuseViaModel: pop.querySelector("#lux-excuse-via-model"),
-    filterEnabled: pop.querySelector("#lux-filter-enabled"),
-    save: pop.querySelector("#lux-save")
-  };
+  function lux_recentReplyKey() { try { return `${_threadKey()}__recent_replies_v1`; } catch { return "lux_recent_replies_global_v1"; } }
+  function lux_getRecentReplies() { try { const arr = JSON.parse(GM_getValue(lux_recentReplyKey(), "[]")); return Array.isArray(arr) ? arr.slice(-10) : []; } catch { return []; } }
+  function lux_pushRecentReply(text) {
+    try {
+      const arr = lux_getRecentReplies();
+      arr.push(String(text || "").trim());
+      while (arr.length > 10) arr.shift();
+      GM_setValue(lux_recentReplyKey(), JSON.stringify(arr));
+    } catch {}
+  }
 
-  ui.apiUrl.value = GM_getValue("lux_api_url", API_URL_DEFAULT);
-  ui.apiKey.value = lux_getApiKey();
-  ui.model.value = GM_getValue("lux_model", MODEL_DEFAULT);
-  ui.provider.value = GM_getValue("lux_provider", PROVIDER_DEFAULT);
-  ui.persona.value = GM_getValue("lux_persona", "");
-  ui.excuseViaModel.checked = GM_getValue("lux_excuse_via_model", 1) === 1;
-  ui.filterEnabled.checked = !!GM_getValue("lux_filter_enabled", 0);
+  function luxPickConversationTheme(seedText = "") {
+    return LUX_CONVERSATION_THEMES[Math.abs(hashStr(seedText || String(Date.now()))) % LUX_CONVERSATION_THEMES.length];
+  }
 
-  const modelChoices = [
-    "x-ai/grok-4-fast",
-    "anthropic/claude-3.5-sonnet",
-    "openai/gpt-4.1-mini",
-    "meta-llama/llama-3.3-8b-instruct:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-chat"
-  ];
+  function luxQuestionFromTheme(theme) {
+    switch (theme) {
+      case "memory": return "That makes me wonder, when did that first become part of your life?";
+      case "curiosity": return "Now you've made me curious, what made you think about that today?";
+      case "emotion": return "How did that actually make you feel when it happened?";
+      case "story": return "There has to be a story behind that, what really happened?";
+      case "opinions": return "Do you genuinely believe that, or are you still figuring it out yourself?";
+      case "work": return "How did you end up in that kind of work in the first place?";
+      case "travel": return "Is there a place you've been that still stays in your head sometimes?";
+      case "food": return "What's one meal you could never really get tired of?";
+      case "music": return "What song can change your mood almost instantly?";
+      case "relationships": return "What usually makes you feel close to someone?";
+      case "values": return "What matters most to you these days, really?";
+      case "life": return "Looking back, what moment changed things the most for you?";
+      case "future": return "If life went your way from here, what would it start looking like?";
+      case "humor": return "What's the funniest thing that's happened to you lately?";
+      case "growth": return "What's something you've learned about yourself in the last few years?";
+      case "beliefs": return "What's one belief that shaped the way you see people?";
+      case "childhood": return "Were you always a little like this, even when you were younger?";
+      case "dreams": return "If you got exactly what you wanted, where would that take you?";
+      default: return "Tell me more about that.";
+    }
+  }
 
-  let LUXSettingsDirty = false;
+  function luxQuestionGuide(tone, engagement, userText) {
+    const theme = luxPickConversationTheme(`${userText}|${tone}|${engagement}`);
+    const sample = luxQuestionFromTheme(theme);
+    let base = [
+      "End with exactly one open ended question only if it feels natural.",
+      "The question must feel human, unique, and easy to answer.",
+      "Avoid templated patterns like wildest, craziest, most spontaneous, most adventurous, tell me about yourself, how was your day, or what are you up to.",
+      "Use curiosity, memory, emotion, story, opinions, values, future, humor, work, travel, food, music, relationships, growth, beliefs, childhood, or dreams.",
+      `A good direction for this reply would sound like this, ${sample}`
+    ].join(" ");
+    if (tone === "angry") base += " Their tone is tense, ask something calm that helps them explain what actually bothered them.";
+    else if (tone === "cold") base += " Their tone is dry, make the question light and easy, but still a little personal.";
+    else if (tone === "serious") base += " Their tone is serious, ask something thoughtful and specific.";
+    else if (tone === "sweet") base += " Their tone is affectionate, ask something warm that deepens softness or closeness.";
+    else if (tone === "flirty") base += " Their tone is teasing, ask something playful and magnetic without sounding repetitive.";
+    else if (tone === "playful") base += " Their tone is playful, ask something fun or a little unexpected.";
+    else if (engagement === "low") base += " Keep it easy to answer, but not dull.";
+    return base;
+  }
 
-  function renderModelButtons() {
-    const cur = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
-    const p = ui.modelsPanel;
-    p.innerHTML = "";
-    const head = document.createElement("div");
-    head.style.marginBottom = "6px";
-    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || "default"}</span>`;
-    p.appendChild(head);
+  function lux_toneKey() { try { return _threadKey() + "__tone_v1"; } catch { return "lux_tone_global_v1"; } }
+  function lux_getToneMemory() { try { const raw = GM_getValue(lux_toneKey(), "[]"); const arr = JSON.parse(raw); return Array.isArray(arr) ? arr.slice(-3) : []; } catch { return []; } }
+  function lux_pushToneMemory(item) {
+    try {
+      const arr = lux_getToneMemory();
+      arr.push(item);
+      while (arr.length > 3) arr.shift();
+      GM_setValue(lux_toneKey(), JSON.stringify(arr));
+    } catch {}
+  }
 
-    modelChoices.forEach(m => {
-      const b = document.createElement("button");
-      b.className = "lux-model";
-      b.textContent = m;
-      b.addEventListener("click", () => {
-        ui.model.value = m;
-        GM_setValue("lux_model", m);
-        const providerField = ui.provider;
-        if (providerField) {
-          if (/gpt-|o3-|o1-/.test(m)) providerField.value = "openai";
-          else providerField.value = "openrouter";
-          GM_setValue("lux_provider", providerField.value.trim());
-        }
-        LUXSettingsDirty = true;
-        notify("Model set to " + m);
-        LUXPatch.UIChips.refresh({ modelLabel: m, countryLabel: parseProfileCountry() || "—" });
-        renderModelButtons();
-      });
-      p.appendChild(b);
+  function withCreativeBoost(base, msg) {
+    const state = lux_getCreativeState();
+    const history = state.history || [];
+    const score = scoreCreativeIntent(msg);
+    history.push(score);
+    if (history.length > 5) history.shift();
+    const highCount = history.filter(s => s >= 0.10).length;
+
+    let temperature = base.temperature ?? 0.7;
+    let top_p = base.top_p ?? 0.9;
+    let repetition_penalty = base.repetition_penalty ?? 1.02;
+    let max_tokens = base.max_tokens ?? 240;
+
+    const daypart = lux_getDaypart();
+    if (daypart === "late-night" || daypart === "night") temperature = Math.min(temperature + 0.05, 1.2);
+    else if (daypart === "morning") temperature = Math.max(temperature - 0.05, 0.45);
+
+    const toneNow = lux_detectTone(msg);
+    const mem = lux_getToneMemory();
+    const lastTone = mem.length ? mem[mem.length - 1].tone : "neutral";
+    const coldStreak = mem.filter(x => x && x.tone === "cold").length >= 2;
+    const tone = toneNow.tone;
+    const engagement = toneNow.engagement;
+
+    if (tone === "flirty") {
+      temperature = Math.min(temperature + 0.08, 1.15);
+      top_p = Math.min(top_p + 0.03, 1.0);
+      repetition_penalty = Math.max(1.00, repetition_penalty - 0.01);
+      max_tokens = Math.min(280, max_tokens + 20);
+    } else if (tone === "sweet") {
+      temperature = Math.min(temperature + 0.05, 1.08);
+      top_p = Math.min(top_p + 0.02, 1.0);
+      repetition_penalty = Math.max(1.00, repetition_penalty - 0.01);
+      max_tokens = Math.min(280, max_tokens + 15);
+    } else if (tone === "serious") {
+      temperature = Math.max(0.48, temperature - 0.08);
+      top_p = Math.max(0.86, top_p - 0.05);
+      repetition_penalty = Math.min(1.06, repetition_penalty + 0.02);
+      max_tokens = Math.max(200, max_tokens - 10);
+    } else if (tone === "angry") {
+      temperature = Math.max(0.46, temperature - 0.10);
+      top_p = Math.max(0.84, top_p - 0.06);
+      repetition_penalty = Math.min(1.06, repetition_penalty + 0.02);
+      max_tokens = Math.max(190, max_tokens - 20);
+    } else if (tone === "cold") {
+      temperature = Math.min(temperature + 0.03, 0.95);
+      top_p = Math.min(top_p + 0.02, 0.98);
+      max_tokens = Math.max(180, Math.min(230, max_tokens - 20));
+    }
+
+    if (coldStreak && tone !== "serious" && tone !== "angry") {
+      temperature = Math.min(temperature + 0.03, 1.05);
+      top_p = Math.min(top_p + 0.02, 1.0);
+      max_tokens = Math.min(280, max_tokens + 10);
+    }
+
+    if (highCount >= 3) {
+      temperature = Math.min(temperature + 0.12, 1.2);
+      top_p = Math.min(top_p + 0.05, 1.0);
+    } else if (highCount >= 1) {
+      temperature = Math.min(temperature + 0.05, 1.1);
+    }
+
+    lux_setCreativeState({ history, lastTone: tone, lastEngagement: engagement, prevTone: lastTone });
+    lux_pushToneMemory({ tone, engagement, ts: Date.now() });
+    return { ...base, temperature, top_p, repetition_penalty, max_tokens };
+  }
+
+  function sanitizePayloadForModel(payload, model) {
+    const m = (model || "").toLowerCase();
+    const p = { ...payload };
+    if ("transforms" in p) delete p.transforms;
+    if ("logit_bias" in p && !p.logit_bias) delete p.logit_bias;
+    if (m.includes("llama-3.2-3b") && p.max_tokens > 260) p.max_tokens = 220;
+    return p;
+  }
+
+  function normalizeForCompare(s) {
+    return (s || "").toLowerCase().replace(/[\u2019']/g, "'").replace(/[^a-z0-9\s?!.]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function ngrams(text, n) {
+    const t = normalizeForCompare(text).split(" ").filter(Boolean);
+    const out = new Set();
+    for (let i = 0; i <= t.length - n; i++) out.add(t.slice(i, i + n).join(" "));
+    return out;
+  }
+  function overlapScore(a, b) {
+    const A = ngrams(a, 3);
+    const B = ngrams(b, 3);
+    if (A.size === 0) return 0;
+    let hit = 0;
+    for (const x of A) if (B.has(x)) hit++;
+    return hit / A.size;
+  }
+  function buildBanlistFromRecent(recent) {
+    const banned = new Set();
+    (recent || []).forEach(r => {
+      for (const x of ngrams(r, 4)) banned.add(x);
+      for (const x of ngrams(r, 5)) banned.add(x);
     });
+    ["what's the first thing", "whats the first thing", "what's on your mind", "whats on your mind", "most spontaneous", "wildest", "craziest"].forEach(x => banned.add(x));
+    return Array.from(banned).slice(0, 160);
   }
 
-  function toggleModelsPanel() {
-    const p = ui.modelsPanel;
-    const open = getComputedStyle(p).display !== "none" && getComputedStyle(p).visibility !== "hidden";
-    if (open) { p.style.display = "none"; p.style.visibility = "hidden"; }
-    else { renderModelButtons(); p.style.display = "block"; p.style.visibility = "visible"; }
+  function luxHumanReaction(seedText = "") {
+    return pickByHash(LUX_HUMAN_REACTIONS, seedText || String(Date.now())) || "";
   }
-  ui.models.addEventListener("click", toggleModelsPanel);
+
+  function buildSystemPrompt(leftCard, customSystem, imageNotes) {
+    const card = personaCardLine(leftCard) || "";
+    const modelName = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim().toLowerCase();
+    const tc = buildTimeContext();
+    const last = (window.__LUX_LAST_USER || "");
+    const toneInfo = lux_detectTone(last);
+    const qGuide = luxQuestionGuide(toneInfo.tone, toneInfo.engagement, last);
+    const jobLine = suggestJobLine(leftCard, leftCard?.age);
+    const accentInstruction = getAccentInstructionByCountry(leftCard?.country || "");
+    const recent = lux_getRecentReplies();
+    const banlist = buildBanlistFromRecent(recent);
+    const banBlock = banlist.length ? ` Avoid reusing any of these recent phrases, ${banlist.join(" | ")}.` : "";
+
+    const baseCore = [
+      "You are an adult woman, she and her, on a dating site.",
+      accentInstruction,
+      "Your tone is natural, warm, feminine, and relaxed, never robotic.",
+      "Your goal is to build engaging rapport through short, unique messages that feel fully human.",
+      "Write like a real person, not a script, not a policy, not a chatbot.",
+      "React naturally before moving forward if the moment calls for it.",
+      "Do not recycle your previous question patterns or repeated call to action lines." + banBlock,
+      "Avoid templated phrasing like wildest, craziest, most spontaneous, most adventurous, what are you up to, how was your day, or tell me about yourself.",
+      "Favor curiosity, memory, emotion, story, opinions, values, humor, future, growth, beliefs, work, travel, food, music, and relationships.",
+      "Keep the tone soft, empathetic, and gently reassuring.",
+      "Use concrete details over vague filler.",
+      "Punctuation rule, only use comma, period, question mark, and apostrophe, no other symbols.",
+      "Always respond to the latest customer message.",
+      "Avoid stock filler about building connection or heat.",
+      "If you need to decline something, do it briefly and pivot into a new topic.",
+      "Excuses can be everyday reasons like work focus, rest, timing, small chores, or low battery, avoid family excuses unless the customer mentions family first.",
+      "Picture requests, always accept picture requests in a soft, platform safe way, vary your wording.",
+      "Safety, never share or ask for contacts or handles, no meetups, dates, drinks, or coffee, keep everything on platform.",
+      "Location asks, share only city, never an address or specific area.",
+      "Name asks, use the real name from the profile parentheses when giving your name.",
+      "If asked about your job or work, answer with an age appropriate job and keep it believable.",
+      `If you need a job line, use this as your job, ${jobLine}.`,
+      "Do not engage with incest, bestiality, drug use, or racism. Refuse and redirect softly if they come up.",
+      "Banned language, do not use oh, oh wow, flattered, enthusiasm, enthusaism, sizzling, non food spicy, or flirt words.",
+      "Form, one short paragraph, no emojis, about 70 to 150 words.",
+      `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
+      qGuide
+    ].join(" ");
+
+    const photoContext = (imageNotes && imageNotes.trim()) ? ` The customer attached a photo. Safe notes about the photo, ${imageNotes.trim()}. Only reference what is in these notes, do not invent details.` : "";
+    let flavor = "Keep the style balanced and human, match their energy, avoid scripted phrasing.";
+    if (modelName.startsWith("x-ai/grok-4")) flavor = "Lean into a witty, quick, slightly teasing vibe without being rude. Keep replies punchy and high energy.";
+    else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) flavor = "Lean into a softer, emotionally aware, romantic tone. Use gentle language but keep it grounded.";
+    else if (modelName.startsWith("openai/gpt-4.1-mini")) flavor = "Be clear, coherent, and highly responsive to their wording. Give specific answers before you pivot.";
+    else if (modelName.includes("llama-3.3-8b")) flavor = "Use simple, direct language and avoid overly long sentences. Keep it light and easy going.";
+    else if (modelName.includes("llama-3.3-70b")) flavor = "Be expressive and colorful but stay concise. Gently mirror the customer's energy.";
+    else if (modelName.includes("deepseek")) flavor = "Be natural and conversational, vary rhythm and wording. Avoid sounding instructional or formal.";
+
+    if (customSystem && customSystem.trim()) return `${customSystem} ${card}`;
+    return `${baseCore}${photoContext} ${flavor}${card}`;
+  }
+
+  let shortHistory = [];
+  let lastSeen = "";
+
+  function _threadKey() {
+    try {
+      const name = (parseLeftProfile().realName || "Lux");
+      const path = (location.pathname || "/").slice(0, 128);
+      return `lux_thread_${name}__${path}`;
+    } catch {
+      return "lux_thread_Lux__/";
+    }
+  }
+  function _loadHistory() {
+    try {
+      const raw = GM_getValue(_threadKey(), "[]");
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) shortHistory = arr.slice(-HISTORY_MAX);
+    } catch {}
+  }
+  function _saveHistory() {
+    try { GM_setValue(_threadKey(), JSON.stringify(shortHistory.slice(-HISTORY_MAX))); }
+    catch {}
+  }
+  _loadHistory();
+
+  function lux_cleanHistoryMessage(msg) {
+    const split = extractLuxImageMeta(msg.content || "");
+    const content = stripStampsAll(split.text || "");
+    return { ...msg, content };
+  }
+  function lux_cleanHistoryArray(history) { return (history || []).map(lux_cleanHistoryMessage); }
+  function lux_buildHistoryByTokens(history, maxTokensForHistory) {
+    const cleaned = lux_cleanHistoryArray(history || []);
+    let total = 0;
+    const reversed = [...cleaned].reverse();
+    const kept = [];
+    for (const msg of reversed) {
+      const t = lux_estimateTokens(msg.content || "");
+      if (total + t > maxTokensForHistory) break;
+      total += t;
+      kept.push(msg);
+    }
+    return kept.reverse();
+  }
 
   const LUXPatch = (typeof window.LUXPatch !== "undefined" ? window.LUXPatch : (window.LUXPatch = {}));
 
-  LUXPatch.UIChips = (() => {
-    const ids = { topbar: "lux-topbar", chipModel: "lux-chip-model", chipDaypart: "lux-chip-daypart", chipCountry: "lux-chip-country" };
-    function ensureStyles() {
-      if (document.getElementById("luxpatch-chips-style")) return;
-      const css = document.createElement("style");
-      css.id = "luxpatch-chips-style";
-      css.textContent = ".luxpatch-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.luxpatch-chip{background:#2b3545;border:1px solid #3c4c66;color:#cfe0ff;border-radius:999px;padding:4px 10px;font-size:12px}.luxpatch-brand{font-weight:900;letter-spacing:.4px;color:#bcd7ff}";
-      document.head.appendChild(css);
-    }
-    function timeChipLabel() {
-      const tc = buildTimeContext();
-      return `${tc.rawDayTime} • ${tc.daypart} • ${tc.dayName}`;
-    }
-    function mountTopbar(container) {
-      ensureStyles();
-      if (!container) return null;
-      const top = document.createElement("div");
-      top.id = ids.topbar;
-      top.className = "luxpatch-topbar";
-      top.innerHTML = `
-        <div class="luxpatch-brand">LUX</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <span class="luxpatch-chip" id="${ids.chipModel}">model: —</span>
-          <span class="luxpatch-chip" id="${ids.chipCountry}">country: —</span>
-          <span class="luxpatch-chip" id="${ids.chipDaypart}">—</span>
-        </div>`;
-      container.appendChild(top);
-      refresh({ modelLabel: "default", countryLabel: parseProfileCountry() || "—" });
-      return top;
-    }
-    function refresh({ modelLabel, countryLabel }) {
-      const m = document.getElementById(ids.chipModel);
-      const d = document.getElementById(ids.chipDaypart);
-      const c = document.getElementById(ids.chipCountry);
-      if (m && modelLabel) m.textContent = `model: ${modelLabel}`;
-      if (c) c.textContent = `country: ${countryLabel || parseProfileCountry() || "—"}`;
-      if (d) d.textContent = timeChipLabel();
-    }
-    function unmount() { const n = document.getElementById(ids.topbar); if (n) n.remove(); }
-    return { mountTopbar, refresh, unmount, ids };
-  })();
-
-  LUXPatch.UIChips.mountTopbar(ui.topbar);
-  LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || "default"), countryLabel: parseProfileCountry() || "—" });
-
-  // NO POOLS: scrub only, no substitutions
   LUXPatch.NoRepeat = (() => {
     const bannedPhrases = [
-      "what's the first thing","whats the first thing",
-      "what's on your mind","whats on your mind",
-      "tell me what's on your mind","tell me what is on your mind",
-      "how was your day","what are you up to","tell me about yourself"
+      "what's the first thing", "whats the first thing",
+      "what's on your mind", "whats on your mind",
+      "tell me what's on your mind", "tell me what is on your mind",
+      "how was your day", "what are you up to", "tell me about yourself",
+      "most spontaneous", "wildest", "craziest"
     ];
     const bannedRegexes = [
       /let['’]?s\s+keep\s+building\s+(?:the\s+)?(?:heat|connection)(?:\s+or\s+(?:the\s+)?(?:heat|connection))?/gi,
@@ -1237,10 +1359,8 @@ async function lux_ensureAccess() {
     const NAME_RE = /\b(what(?:'| i)?s\s+your\s+name|ur\s*name|name\s*please|name\s*pls|who\s+are\s+you)\b/i;
     const LOCATION_RE = /\b(where\s+do\s+you\s+(?:live|stay)|where\s+are\s+you|what\s+city|your\s+city|your\s+location|where\s+are\s+you\s+based|where\s+are\s+u\s+at|what\s+part\s+are\s+you\s+in|where\s+do\s+you\s+reside|what\s+part\s+of\s+town|where\s+you\s+located|where\s+are\s+you\s+located)\b/i;
     const JOB_RE = /\b(what\s+do\s+you\s+do|your\s+job|your\s+work|what\s+is\s+your\s+job|occupation|career|what\s+do\s+you\s+work\s+as)\b/i;
-
     const USER_MENTIONS_FAMILY_RE = /\b(family|my\s+(?:sister|brother|mom|mother|dad|father|parents?|cousin|aunt|uncle|kids?|child|niece|nephew)|babysit(?:ting)?|family\s+issues?)\b/i;
     const FAMILY_WORD_RE = /\b(family|mom|mother|dad|father|parents?|sister|brother|cousin|aunt|uncle|kids?|child|children|babysit(?:ting)?|relatives?)\b/gi;
-
     const INCEST_RE = /\b(?:incest|brother and sister|mother and son|father and daughter|mom and son|dad and daughter|family sex|sleep with my sister|sleep with my mother|sleep with my mom|sleep with my daughter|sexual with my sister|sexual with my mother|sexual with my daughter)\b/i;
     const BESTIALITY_RE = /\b(?:bestiality|animal sex|sex with (?:a |an )?(?:dog|cat|horse|animal|pet)|fucking (?:a |an )?(?:dog|cat|horse|animal|pet)|my dog turned me on|my pet turned me on)\b/i;
     const DRUG_USE_RE = /\b(?:cocaine|weed|marijuana|meth|heroin|crack|ecstasy|mdma|molly|ketamine|lsd|shrooms|drug use|getting high|get high|snort|inject|smoke a blunt|take pills to get high)\b/i;
@@ -1263,7 +1383,6 @@ async function lux_ensureAccess() {
       return "";
     }
 
-    // NO POOLS: deterministic deFamily replacement
     function deFamily(text, customerMsg) {
       if (!text) return text;
       const userMentionedFamily = USER_MENTIONS_FAMILY_RE.test(customerMsg || "");
@@ -1312,7 +1431,7 @@ async function lux_ensureAccess() {
         "Refuse in a way that sounds genuinely human, not scripted, not polished, not corporate.",
         "Do not sound like a safety policy.",
         "Do not use the same structure every time.",
-        "Sometimes the reason can simply be privacy, caution, timing, mood, trust, or not wanting to rush things.",
+        "Sometimes the reason can simply be privacy, caution, timing, mood, or not wanting to rush things.",
         "Vary sentence openings and emotional texture.",
         "No contacts, no meetups, no addresses, keep the boundary firm.",
         `Chosen refusal style: ${picked.name}. ${picked.rule}`,
@@ -1321,7 +1440,6 @@ async function lux_ensureAccess() {
         "No semicolons, no em dashes, no parentheses.",
         "Keep it to 2 or 3 sentences.",
         "If you end with a question, make it interesting, not generic.",
-        "Avoid generic questions like what made you reach out, what are you up to, tell me about yourself, or how was your day.",
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         personaCardLine(profileCard) || ""
       ].join(" ");
@@ -1333,10 +1451,15 @@ async function lux_ensureAccess() {
         "Make it sound like a real woman texting naturally in the moment."
       ].join("\n");
 
-      const concise = { max_tokens: 120, temperature: 0.68, top_p: 0.93, frequency_penalty: 0.35, presence_penalty: 0.25 };
       let out = "";
       try {
-        out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], concise);
+        out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
+          max_tokens: 120,
+          temperature: 0.68,
+          top_p: 0.93,
+          frequency_penalty: 0.35,
+          presence_penalty: 0.25
+        });
       } catch {}
       out = deFamily(out || "", customerMsg);
       out = postFormat(out || "");
@@ -1355,7 +1478,6 @@ async function lux_ensureAccess() {
         "Refuse calmly and briefly.",
         "Do not engage with the topic.",
         "Do not debate it.",
-        "Be erotic.",
         "Do not encourage it.",
         "Set a soft but clear boundary, then redirect to a harmless different topic.",
         "Keep it natural, feminine, simple, and human.",
@@ -1366,9 +1488,14 @@ async function lux_ensureAccess() {
         personaCardLine(profileCard) || ""
       ].join(" ");
       const user = `Context: ${kindLine}\nCustomer: "${(customerMsg || "").slice(0, 260)}"\nReply with a brief refusal and redirect to a safer subject.`;
-      const concise = { max_tokens: 95, temperature: 0.28, top_p: 0.86 };
       let out = "";
-      try { out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], concise); } catch {}
+      try {
+        out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
+          max_tokens: 95,
+          temperature: 0.28,
+          top_p: 0.86
+        });
+      } catch {}
       out = postFormat(out || "");
       return out || "I'm not comfortable with that kind of talk, dear. Tell me something lighter about you instead?";
     }
@@ -1384,7 +1511,10 @@ async function lux_ensureAccess() {
   })();
 
   const ALLOWED_RE = /[^0-9A-Za-z\s\.,\?']/g;
-  function isFoodContext(text) { return /\b(food|meal|dinner|lunch|breakfast|snack|taste|recipe|flavor|flavour|cook|cooking|spice|spices)\b/i.test(text || ""); }
+
+  function isFoodContext(text) {
+    return /\b(food|meal|dinner|lunch|breakfast|snack|taste|recipe|flavor|flavour|cook|cooking|spice|spices)\b/i.test(text || "");
+  }
 
   function purgeBannedWords(s) {
     let t = (s || "");
@@ -1399,6 +1529,9 @@ async function lux_ensureAccess() {
     if (!isFoodContext(t)) t = t.replace(/\bspicy\b/gi, "bold");
     t = t.replace(/\bflirty\b/gi, "playful");
     t = t.replace(/\bflirt(?:s|ed|ing)?\b/gi, "chat");
+    t = t.replace(/\bmost\s+spontaneous\b/gi, "interesting");
+    t = t.replace(/\bwildest\b/gi, "interesting");
+    t = t.replace(/\bcraziest\b/gi, "interesting");
     t = t.replace(/\s{2,}/g, " ").trim();
     return t;
   }
@@ -1411,16 +1544,6 @@ async function lux_ensureAccess() {
       .replace(/[–—\-]/g, " ")
       .replace(/\u2026/g, "...")
       .replace(/\r?\n+/g, " ");
-  }
-
-  function smartPunct(s) {
-    let t = (s || "");
-    t = t.replace(/!/g, ".");
-    t = t.replace(/[:;()]/g, " ");
-    t = t.replace(/\s*([,\.?])\s*/g, "$1 ");
-    t = t.replace(/\.{3,}/g, "...");
-    t = t.replace(/\s{2,}/g, " ");
-    return t.trim();
   }
 
   function stripDisallowedPunct(s) { return (s || "").replace(ALLOWED_RE, ""); }
@@ -1443,7 +1566,7 @@ async function lux_ensureAccess() {
   }
 
   function applyLexiconPrefs(s) {
-    const LEXICON_PREFS = [
+    const prefs = [
       { from: /\binterested\b/gi, to: "curious" },
       { from: /\bvery\b/gi, to: "" },
       { from: /\bsexy\b/gi, to: "bold" },
@@ -1452,7 +1575,7 @@ async function lux_ensureAccess() {
       { from: /\bfavo(u?)rite(s)?\b/gi, to: "best thing" }
     ];
     let t = s;
-    for (const r of LEXICON_PREFS) t = t.replace(r.from, r.to);
+    for (const r of prefs) t = t.replace(r.from, r.to);
     return t;
   }
 
@@ -1464,8 +1587,14 @@ async function lux_ensureAccess() {
     return t.trim();
   }
 
-  function fixPronounI(s) { return s.replace(/\b(i)\b/g, "I").replace(/\bi'm\b/gi, "I'm").replace(/\bi've\b/gi, "I've").replace(/\bi'd\b/gi, "I'd").replace(/\bi'll\b/gi, "I'll"); }
-  function ensureTerminalPunct(s) { s = s.trim(); return s ? (/[\.?]$/.test(s) ? s : (s + ".")) : s; }
+  function fixPronounI(s) {
+    return s.replace(/\b(i)\b/g, "I").replace(/\bi'm\b/gi, "I'm").replace(/\bi've\b/gi, "I've").replace(/\bi'd\b/gi, "I'd").replace(/\bi'll\b/gi, "I'll");
+  }
+
+  function ensureTerminalPunct(s) {
+    s = s.trim();
+    return s ? (/[\.?]$/.test(s) ? s : (s + ".")) : s;
+  }
 
   function enforceFeminineTone(s) {
     let t = s || "";
@@ -1476,13 +1605,61 @@ async function lux_ensureAccess() {
     return t;
   }
 
-  function capitalizeSentences(text) {
-    let s = (text || "").trim();
-    if (!s) return s;
-    s = s.replace(/\s+/g, " ");
-    s = s.replace(/(^|[.!?]\s+)([a-z])/g, (m, p1, p2) => p1 + p2.toUpperCase());
-    s = s.replace(/\bi\b/g, "I");
-    return s;
+  function luxSentenceCase(text) {
+    let t = String(text || "").trim();
+    if (!t) return t;
+    t = t.replace(/\s+/g, " ");
+    t = t.replace(/(^|[.!?]\s+)([a-z])/g, (_, a, b) => a + b.toUpperCase());
+    t = t.replace(/\bi\b/g, "I");
+    return t;
+  }
+
+  function luxRepairPunctuation(text) {
+    let t = String(text || "");
+    t = t.replace(/[!]+/g, ".");
+    t = t.replace(/[:;()]/g, " ");
+    t = t.replace(/\.{3,}/g, ".");
+    t = t.replace(/\?{2,}/g, "?");
+    t = t.replace(/,{2,}/g, ",");
+    t = t.replace(/\s*([,.?])\s*/g, "$1 ");
+    t = t.replace(/\s+,/g, ",");
+    t = t.replace(/\s+\./g, ".");
+    t = t.replace(/\s+\?/g, "?");
+    t = t.replace(/,\s*\./g, ".");
+    t = t.replace(/,\s*\?/g, "?");
+    t = t.replace(/\.\s*\?/g, "?");
+    t = t.replace(/\?\s*\./g, "?");
+    t = t.replace(/\s{2,}/g, " ").trim();
+    return t;
+  }
+
+  function luxSplitRunOns(text) {
+    let t = String(text || "");
+    t = t.replace(/\b(and|but|so)\s+(I|you|he|she|they|we)\b/g, (m, a, b) => `. ${b}`);
+    t = t.replace(/\b(I|You|He|She|They|We)\s+(I|You|He|She|They|We)\b/g, "$1. $2");
+    t = t.replace(/\.\s*\.\s*/g, ". ");
+    t = t.replace(/\s{2,}/g, " ").trim();
+    return t;
+  }
+
+  function luxEnsureSingleQuestion(text) {
+    let t = String(text || "").trim();
+    if (!t) return t;
+    const qCount = (t.match(/\?/g) || []).length;
+    if (qCount <= 1) return t;
+    let seen = 0;
+    t = t.replace(/\?/g, () => {
+      seen += 1;
+      return seen === qCount ? "?" : ".";
+    });
+    return t;
+  }
+
+  function luxEnsureEnding(text) {
+    let t = String(text || "").trim();
+    if (!t) return t;
+    if (!/[.?]$/.test(t)) t += ".";
+    return t;
   }
 
   function postFormat(text) {
@@ -1491,15 +1668,17 @@ async function lux_ensureAccess() {
     t = toAscii(t);
     t = enforceFeminineTone(t);
     t = stripDisallowedPunct(t);
-    t = smartPunct(t);
     t = purgeBannedWords(t);
     t = applyLexiconPrefs(t);
     t = fixMissingApostrophes(t);
-    t = normalizeSpaces(t);
-    t = capitalizeSentences(t);
+    t = luxRepairPunctuation(t);
+    t = luxSplitRunOns(t);
+    t = luxEnsureSingleQuestion(t);
+    t = luxSentenceCase(t);
     t = fixPronounI(t);
+    t = normalizeSpaces(t);
     if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") t = LUXPatch.NoRepeat.scrub(t);
-    t = ensureTerminalPunct(t);
+    t = luxEnsureEnding(t);
     return clampToLimit(t);
   }
 
@@ -1508,7 +1687,9 @@ async function lux_ensureAccess() {
       const data = JSON.parse(responseText || "{}");
       const raw = (data?.choices?.[0]?.message?.content || "").trim();
       return raw || "";
-    } catch { return ""; }
+    } catch {
+      return "";
+    }
   }
 
   function gmPostJSON(url, headers, body, timeoutMs) {
@@ -1531,9 +1712,10 @@ async function lux_ensureAccess() {
     const key = lux_getApiKey().trim();
     const model = GM_getValue("lux_model", MODEL_DEFAULT).trim();
     if (!key) throw new Error("Missing OpenRouter API key");
+
     const base = getModelPreset(model);
     const tuned = withCreativeBoost(base, (messages?.[messages.length - 1]?.content) || "");
-    let body = sanitizePayloadForModel({
+    const body = sanitizePayloadForModel({
       model,
       messages,
       temperature: tuned.temperature,
@@ -1564,7 +1746,9 @@ async function lux_ensureAccess() {
             const content = data?.choices?.[0]?.message?.content?.trim();
             if (!content) return reject(new Error("Empty content from OpenRouter"));
             resolve(content);
-          } catch (e) { reject(e); }
+          } catch (e) {
+            reject(e);
+          }
         },
         onerror: () => reject(new Error("OpenRouter network error")),
         ontimeout: () => reject(new Error("OpenRouter timeout"))
@@ -1572,140 +1756,247 @@ async function lux_ensureAccess() {
     });
   }
 
-  // CPE anti-repeat memory
-  function lux_recentReplyKey() { try { return `${_threadKey()}__recent_replies_v1`; } catch { return "lux_recent_replies_global_v1"; } }
-  function lux_getRecentReplies() { try { const arr = JSON.parse(GM_getValue(lux_recentReplyKey(), "[]")); return Array.isArray(arr) ? arr.slice(-10) : []; } catch { return []; } }
-  function lux_pushRecentReply(text) {
-    try {
-      const arr = lux_getRecentReplies();
-      arr.push(String(text || "").trim());
-      while (arr.length > 10) arr.shift();
-      GM_setValue(lux_recentReplyKey(), JSON.stringify(arr));
-    } catch {}
-  }
-  function normalizeForCompare(s) {
-    return (s || "").toLowerCase().replace(/[\u2019']/g, "'").replace(/[^a-z0-9\s?!.]/g, " ").replace(/\s+/g, " ").trim();
-  }
-  function ngrams(text, n) {
-    const t = normalizeForCompare(text).split(" ").filter(Boolean);
-    const out = new Set();
-    for (let i = 0; i <= t.length - n; i++) out.add(t.slice(i, i + n).join(" "));
-    return out;
-  }
-  function overlapScore(a, b) {
-    const A = ngrams(a, 3);
-    const B = ngrams(b, 3);
-    if (A.size === 0) return 0;
-    let hit = 0;
-    for (const x of A) if (B.has(x)) hit++;
-    return hit / A.size;
-  }
-  function buildBanlistFromRecent(recent) {
-    const banned = new Set();
-    (recent || []).forEach(r => {
-      for (const x of ngrams(r, 4)) banned.add(x);
-      for (const x of ngrams(r, 5)) banned.add(x);
-    });
-    ["what's the first thing","whats the first thing","what's on your mind","whats on your mind"].forEach(x => banned.add(x));
-    return Array.from(banned).slice(0, 140);
-  }
-
-  function buildSystemPrompt(leftCard, customSystem, imageNotes) {
-    const card = (personaCardLine(leftCard) || "");
-    const modelName = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim().toLowerCase();
-    const tc = buildTimeContext();
-    const last = (window.__LUX_LAST_USER || "");
-    const toneInfo = lux_detectTone(last);
-    const qGuide = lux_questionGuide(toneInfo.tone, toneInfo.engagement);
-    const jobLine = suggestJobLine(leftCard, leftCard?.age);
-    const accentInstruction = getAccentInstructionByCountry(leftCard?.country || "");
-
-    const recent = lux_getRecentReplies();
-    const banlist = buildBanlistFromRecent(recent);
-    const banBlock = banlist.length ? ` Avoid reusing any of these recent phrases, ${banlist.join(" | ")}.` : "";
-
-    const baseCore = [
-      "You are an adult woman, she and her, on a dating site.",
-      accentInstruction,
-      "Your tone is natural, warm, feminine and relaxed, never robotic.",
-      "Your primary goal is to build deep, engaging rapport through short, unique messages.",
-      "Write like a real person, logical, grounded, and humane, avoid repetitive phrasing.",
-      ("Do not recycle your previous question patterns or repeated call to action lines." + banBlock),
-      "Keep the tone soft, empathetic, and gently reassuring.",
-      "Favor concrete details over vague filler.",
-      "Punctuation rule, only use comma, period, question mark, and apostrophe, no other symbols.",
-      "Always respond to the latest customer message.",
-      "Avoid stock filler about building connection or heat.",
-      "If you need to decline something, do it briefly and pivot into a new topic.",
-      "Excuses can be everyday reasons like work focus, rest, timing, small chores, or low battery, avoid family excuses unless the customer mentions family first.",
-      "Picture requests, always accept picture requests in a soft, platform safe way, vary your wording.",
-      "Safety, never share or ask for contacts or handles, no meetups, dates, drinks, or coffee, keep everything on platform.",
-      "Location asks, share only city, never an address or specific area.",
-      "Name asks, use the real name from the profile parentheses when giving your name.",
-      "If asked about your job or work, answer with an age appropriate job and keep it believable.",
-      `If you need a job line, use this as your job, ${jobLine}.`,
-      "Do not engage with incest, bestiality, drug use, or racism. Refuse and redirect softly if they come up.",
-      "Banned language, do not use oh, oh wow, flattered, enthusiasm, enthusaism, sizzling, non food spicy, or flirt words.",
-      "Form, one short paragraph, no emojis, about 70 to 150 words.",
-      `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-      qGuide
-    ].join(" ");
-
-    const photoContext = (imageNotes && imageNotes.trim()) ? ` The customer attached a photo. Safe notes about the photo, ${imageNotes.trim()}. Only reference what is in these notes, do not invent details.` : "";
-    let flavor = "Keep the style balanced and human, match their energy, avoid scripted phrasing.";
-    if (modelName.startsWith("x-ai/grok-4")) flavor = "Lean into a witty, quick, slightly teasing vibe without being rude. Keep replies punchy and high energy.";
-    else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) flavor = "Lean into a softer, emotionally aware, romantic tone. Use gentle language but keep it grounded.";
-    else if (modelName.startsWith("openai/gpt-4.1-mini")) flavor = "Be clear, coherent and highly responsive to their wording. Give specific answers before you pivot to a question.";
-    else if (modelName.includes("llama-3.3-8b")) flavor = "Use simple, direct language and avoid overly long sentences. Keep it light and easy going.";
-    else if (modelName.includes("llama-3.3-70b")) flavor = "Be expressive and colorful but stay concise. Gently mirror the customer's energy.";
-    else if (modelName.includes("deepseek")) flavor = "Be natural and conversational, vary rhythm and wording. Avoid sounding instructional or formal.";
-    const core = baseCore + photoContext + " " + flavor;
-
-    if (customSystem && customSystem.trim()) return customSystem + " " + card;
-    return core + card;
-  }
-
-  let shortHistory = [];
-  let lastSeen = "";
-
-  function _threadKey() {
-    try {
-      const name = (parseLeftProfile().realName || "Lux");
-      const path = (location.pathname || "/").slice(0, 128);
-      return `lux_thread_${name}__${path}`;
-    } catch { return "lux_thread_Lux__/"; }
-  }
-  function _loadHistory() {
-    try {
-      const raw = GM_getValue(_threadKey(), "[]");
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) shortHistory = arr.slice(-HISTORY_MAX);
-    } catch {}
-  }
-  function _saveHistory() { try { GM_setValue(_threadKey(), JSON.stringify(shortHistory.slice(-HISTORY_MAX))); } catch {} }
-  _loadHistory();
-
-  function lux_cleanHistoryMessage(msg) {
-    const split = extractLuxImageMeta(msg.content || "");
-    const content = stripStampsAll(split.text || "");
-    let out = content;
-    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") out = LUXPatch.NoRepeat.scrub(out);
-    return { ...msg, content: out };
-  }
-  function lux_cleanHistoryArray(history) { return (history || []).map(lux_cleanHistoryMessage); }
-  function lux_buildHistoryByTokens(history, maxTokensForHistory) {
-    const cleaned = lux_cleanHistoryArray(history || []);
-    let total = 0;
-    const reversed = [...cleaned].reverse();
-    const kept = [];
-    for (const msg of reversed) {
-      const t = lux_estimateTokens(msg.content || "");
-      if (total + t > maxTokensForHistory) break;
-      total += t;
-      kept.push(msg);
+  function luxInitVoices() {
+    if (!("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    function loadVoices() {
+      const voices = synth.getVoices() || [];
+      if (voices.length) {
+        LUX_VOICE_CACHE.voices = voices;
+        LUX_VOICE_CACHE.ready = true;
+      }
     }
-    return kept.reverse();
+    loadVoices();
+    try {
+      synth.addEventListener("voiceschanged", loadVoices);
+    } catch {
+      synth.onvoiceschanged = loadVoices;
+    }
   }
+
+  function luxCleanTextForSpeech(text) {
+    let t = String(text || "");
+    t = t.replace(/\s+/g, " ").trim();
+    t = t.replace(/\.{3,}/g, ".");
+    t = t.replace(/\s*([,?.])\s*/g, "$1 ");
+    t = t.replace(/[^\w\s,?.']/g, " ");
+    t = t.replace(/\s{2,}/g, " ").trim();
+    return t;
+  }
+
+  function luxPickBestVoice(gender = "female") {
+    const voices = LUX_VOICE_CACHE.voices || [];
+    if (!voices.length) return null;
+    const englishVoices = voices.filter(v => /^en/i.test(v.lang || ""));
+    const pool = englishVoices.length ? englishVoices : voices;
+    const femalePreferred = [/aria/i, /jenny/i, /samantha/i, /zira/i, /serena/i, /hazel/i, /google us english/i, /female/i];
+    const malePreferred = [/davis/i, /david/i, /guy/i, /mark/i, /alex/i, /daniel/i, /male/i];
+    const wanted = gender === "male" ? malePreferred : femalePreferred;
+    for (const rx of wanted) {
+      const hit = pool.find(v => rx.test(v.name || ""));
+      if (hit) return hit;
+    }
+    return pool[0] || null;
+  }
+
+  function luxSpeak(text) {
+    if (!GM_getValue("lux_voice_enabled", 0)) return;
+    if (!("speechSynthesis" in window)) return;
+    const clean = luxCleanTextForSpeech(text);
+    if (!clean) return;
+    try {
+      const synth = window.speechSynthesis;
+      synth.cancel();
+      const utter = new SpeechSynthesisUtterance(clean);
+      const gender = GM_getValue("lux_voice_gender", "female");
+      const voice = luxPickBestVoice(gender);
+      if (voice) {
+        utter.voice = voice;
+        utter.lang = voice.lang || "en-US";
+      } else {
+        utter.lang = "en-US";
+      }
+      utter.volume = 1;
+      utter.rate = 0.92;
+      utter.pitch = gender === "male" ? 0.92 : 1.0;
+      synth.speak(utter);
+    } catch (e) {
+      console.warn("LUX voice failed", e);
+    }
+  }
+
+  const css = document.createElement("style");
+  css.textContent = `
+    #lux-btn{position:fixed;bottom:20px;right:20px;z-index:99999;background:#0b3d91;color:#fff;border:0;padding:10px 16px;border-radius:999px;font-weight:700;cursor:pointer;box-shadow:0 6px 16px rgba(11,61,145,.3)}
+    #lux-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:820px;max-width:98vw;max-height:84vh;overflow:auto;background:#1f1f1f;color:#eee;border:2px solid #0b3d91;border-radius:14px;padding:14px;z-index:100000;font-family:system-ui,sans-serif;display:none}
+    #lux-responses{display:flex;flex-direction:column;gap:8px}
+    .lux-reply{white-space:pre-wrap;border:1px solid #3a4155;border-radius:10px;padding:10px;background:#252525;color:#eaeaea;cursor:pointer}
+    #lux-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+    #lux-actions button{flex:1 1 120px}
+    #lux-settings-panel{display:none;margin-top:8px;border:1px solid #3a4155;border-radius:8px;padding:8px;background:#222;color:#eaeaea}
+    #lux-settings-panel input[type=text],#lux-settings-panel textarea,#lux-settings-panel select{width:100%;padding:6px;border:1px solid #3a4155;background:#1a1a1a;color:#eaeaea;border-radius:6px;margin:4px 0}
+    #lux-models{background:#2b3545;color:#bcd7ff;border:0;border-radius:8px;padding:8px 10px;font-weight:700}
+    #lux-models-panel{display:none;margin-top:8px;border:1px dashed #3c4c66;border-radius:8px;padding:8px}
+    #lux-models-panel .lux-model{margin:4px;padding:6px 10px;border:1px solid #3c4c66;border-radius:8px;background:#1f2937;color:#cfe0ff;cursor:pointer}
+    #lux-models-panel .lux-tag{display:inline-block;background:#0b3d91;color:#fff;border-radius:999px;padding:2px 8px;font-size:12px;margin-left:8px}
+  `;
+  document.head.appendChild(css);
+
+  const btn = document.createElement("button");
+  btn.id = "lux-btn";
+  btn.textContent = "LUX";
+  document.body.appendChild(btn);
+
+  const pop = document.createElement("div");
+  pop.id = "lux-popup";
+  pop.innerHTML = `
+    <div id="lux-topbar" style="margin-bottom:8px"></div>
+    <textarea id="lux-customer" placeholder="Latest customer message" style="width:100%;min-height:96px;border:1px solid #3a4155;background:#2a2a2a;color:#fff;border-radius:8px;padding:8px;margin:8px 0"></textarea>
+    <div id="lux-responses"></div>
+    <div id="lux-actions">
+      <button id="lux-send" style="background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Send</button>
+      <button id="lux-regen" style="background:#113a6b;color:#fff;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Regenerate</button>
+      <button id="lux-models">Models</button>
+      <button id="lux-settings" style="background:#303741;color:#eaeaea;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Settings</button>
+      <button id="lux-close" style="background:#303741;color:#eaeaea;border:0;border-radius:8px;padding:8px 10px;font-weight:700">Close</button>
+    </div>
+    <div id="lux-models-panel"></div>
+    <div id="lux-settings-panel">
+      <div><strong>Backend URL</strong></div><input type="text" id="lux-api-url">
+      <div><strong>OpenRouter API Key</strong></div><input type="text" id="lux-api-key">
+      <div><strong>Model</strong></div><input type="text" id="lux-model">
+      <div><strong>Voice replies</strong></div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:6px 0 10px">
+        <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" id="lux-voice-enabled"> Enable voice</label>
+        <label style="display:flex;gap:8px;align-items:center;">Voice<select id="lux-voice-gender" style="width:auto;margin:0"><option value="female">Female</option><option value="male">Male</option></select></label>
+      </div>
+      <div><strong>Custom Persona (optional)</strong></div><textarea id="lux-persona"></textarea>
+      <button id="lux-save" style="margin-top:6px;background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:6px 10px;font-weight:700">Save</button>
+    </div>
+  `;
+  document.body.appendChild(pop);
+
+  const ui = {
+    popup: pop,
+    topbar: pop.querySelector("#lux-topbar"),
+    customer: pop.querySelector("#lux-customer"),
+    list: pop.querySelector("#lux-responses"),
+    send: pop.querySelector("#lux-send"),
+    regen: pop.querySelector("#lux-regen"),
+    models: pop.querySelector("#lux-models"),
+    modelsPanel: pop.querySelector("#lux-models-panel"),
+    settings: pop.querySelector("#lux-settings"),
+    close: pop.querySelector("#lux-close"),
+    panel: pop.querySelector("#lux-settings-panel"),
+    apiUrl: pop.querySelector("#lux-api-url"),
+    apiKey: pop.querySelector("#lux-api-key"),
+    model: pop.querySelector("#lux-model"),
+    persona: pop.querySelector("#lux-persona"),
+    voiceEnabled: pop.querySelector("#lux-voice-enabled"),
+    voiceGender: pop.querySelector("#lux-voice-gender"),
+    save: pop.querySelector("#lux-save")
+  };
+
+  ui.apiUrl.value = GM_getValue("lux_api_url", API_URL_DEFAULT);
+  ui.apiKey.value = lux_getApiKey();
+  ui.model.value = GM_getValue("lux_model", MODEL_DEFAULT);
+  ui.persona.value = GM_getValue("lux_persona", "");
+  ui.voiceEnabled.checked = !!GM_getValue("lux_voice_enabled", 0);
+  ui.voiceGender.value = GM_getValue("lux_voice_gender", "female");
+
+  const modelChoices = [
+    "x-ai/grok-4-fast",
+    "anthropic/claude-3.5-sonnet",
+    "openai/gpt-4.1-mini",
+    "meta-llama/llama-3.3-8b-instruct:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-chat"
+  ];
+
+  let LUXSettingsDirty = false;
+
+  function renderModelButtons() {
+    const cur = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
+    const p = ui.modelsPanel;
+    p.innerHTML = "";
+    const head = document.createElement("div");
+    head.style.marginBottom = "6px";
+    head.innerHTML = `<strong>Pick a model</strong> <span class="lux-tag">current: ${cur || "default"}</span>`;
+    p.appendChild(head);
+
+    modelChoices.forEach(m => {
+      const b = document.createElement("button");
+      b.className = "lux-model";
+      b.textContent = m;
+      b.addEventListener("click", () => {
+        ui.model.value = m;
+        GM_setValue("lux_model", m);
+        LUXSettingsDirty = true;
+        notify("Model set to " + m);
+        LUXPatch.UIChips.refresh({ modelLabel: m, countryLabel: parseProfileCountry() || "—" });
+        renderModelButtons();
+      });
+      p.appendChild(b);
+    });
+  }
+
+  function toggleModelsPanel() {
+    const p = ui.modelsPanel;
+    const open = getComputedStyle(p).display !== "none" && getComputedStyle(p).visibility !== "hidden";
+    if (open) {
+      p.style.display = "none";
+      p.style.visibility = "hidden";
+    } else {
+      renderModelButtons();
+      p.style.display = "block";
+      p.style.visibility = "visible";
+    }
+  }
+  ui.models.addEventListener("click", toggleModelsPanel);
+
+  LUXPatch.UIChips = (() => {
+    const ids = { topbar: "lux-topbar", chipModel: "lux-chip-model", chipDaypart: "lux-chip-daypart", chipCountry: "lux-chip-country" };
+    function ensureStyles() {
+      if (document.getElementById("luxpatch-chips-style")) return;
+      const css = document.createElement("style");
+      css.id = "luxpatch-chips-style";
+      css.textContent = ".luxpatch-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.luxpatch-chip{background:#2b3545;border:1px solid #3c4c66;color:#cfe0ff;border-radius:999px;padding:4px 10px;font-size:12px}.luxpatch-brand{font-weight:900;letter-spacing:.4px;color:#bcd7ff}";
+      document.head.appendChild(css);
+    }
+    function timeChipLabel() {
+      const tc = buildTimeContext();
+      return `${tc.rawDayTime} • ${tc.daypart} • ${tc.dayName}`;
+    }
+    function mountTopbar(container) {
+      ensureStyles();
+      if (!container) return null;
+      const top = document.createElement("div");
+      top.id = ids.topbar;
+      top.className = "luxpatch-topbar";
+      top.innerHTML = `
+        <div class="luxpatch-brand">LUX</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <span class="luxpatch-chip" id="${ids.chipModel}">model: —</span>
+          <span class="luxpatch-chip" id="${ids.chipCountry}">country: —</span>
+          <span class="luxpatch-chip" id="${ids.chipDaypart}">—</span>
+        </div>`;
+      container.appendChild(top);
+      refresh({ modelLabel: "default", countryLabel: parseProfileCountry() || "—" });
+      return top;
+    }
+    function refresh({ modelLabel, countryLabel }) {
+      const m = document.getElementById(ids.chipModel);
+      const d = document.getElementById(ids.chipDaypart);
+      const c = document.getElementById(ids.chipCountry);
+      if (m && modelLabel) m.textContent = `model: ${modelLabel}`;
+      if (c) c.textContent = `country: ${countryLabel || parseProfileCountry() || "—"}`;
+      if (d) d.textContent = timeChipLabel();
+    }
+    return { mountTopbar, refresh };
+  })();
+
+  LUXPatch.UIChips.mountTopbar(ui.topbar);
+  LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || "default"), countryLabel: parseProfileCountry() || "—" });
 
   function showReplies(items) {
     ui.list.innerHTML = "";
@@ -1741,39 +2032,57 @@ async function lux_ensureAccess() {
     if (blockedKind) {
       let out = await Safety.blockedTopicRefusal(blockedKind, leftCard, rawMsg);
       out = postFormat(out);
+      out = out.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
       showReplies([out]);
       pushHist(rawMsg, out);
       lux_pushRecentReply(out);
+      luxSpeak(out);
       return;
     }
 
     if (Safety.askName(rawMsg)) {
       const profName = (leftCard && leftCard.realName) ? leftCard.realName : "Luna";
-      const sys = "Natural English in the profile country style. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow-matching open-ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
+      const sys = "Natural English in the profile country style. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
       const user = `They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
-      const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
-      let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], concise);
+      let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
+        max_tokens: 100,
+        temperature: 0.30,
+        top_p: 0.88
+      });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
       line = postFormat(line);
-      showReplies([line]); pushHist(rawMsg, line); lux_pushRecentReply(line); return;
+      line = line.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
+      showReplies([line]);
+      pushHist(rawMsg, line);
+      lux_pushRecentReply(line);
+      luxSpeak(line);
+      return;
     }
 
     if (Safety.wantsLocation(rawMsg)) {
       const profCity = (leftCard && leftCard.location) ? leftCard.location : "nearby";
-      const sys = "If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow-matching open-ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
+      const sys = "If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
       const user = `City only: "${profCity}". ${personaCardLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
-      const concise = { max_tokens: 100, temperature: 0.30, top_p: 0.88 };
-      let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], concise);
+      let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
+        max_tokens: 100,
+        temperature: 0.30,
+        top_p: 0.88
+      });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
       line = postFormat(line);
-      showReplies([line]); pushHist(rawMsg, line); lux_pushRecentReply(line); return;
+      line = line.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
+      showReplies([line]);
+      pushHist(rawMsg, line);
+      lux_pushRecentReply(line);
+      luxSpeak(line);
+      return;
     }
 
     if (Safety.wantsJob(rawMsg)) {
       const jobLine = suggestJobLine(leftCard, leftCard?.age);
       const tc = buildTimeContext();
       const toneInfo = lux_detectTone(rawMsg);
-      const qGuide = lux_questionGuide(toneInfo.tone, toneInfo.engagement);
+      const qGuide = luxQuestionGuide(toneInfo.tone, toneInfo.engagement, rawMsg);
       const sys = [
         "You are an adult woman on a dating site. Natural, warm, human, not formal.",
         getAccentInstructionByCountry(leftCard?.country || ""),
@@ -1785,26 +2094,44 @@ async function lux_ensureAccess() {
         `Use this job line as your job, ${jobLine}.`,
         qGuide
       ].join(" ");
-      const user = `They asked about your job.\nCustomer: "${rawMsg.slice(0, 240)}"\nReply in one short paragraph and end with exactly one open ended question.`;
-      const tuned = { max_tokens: 140, temperature: 0.45, top_p: 0.90 };
-      let out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], tuned);
+      const user = `They asked about your job.\nCustomer: "${rawMsg.slice(0, 240)}"\nReply in one short paragraph and end with exactly one open ended question if it feels natural.`;
+      let out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
+        max_tokens: 140,
+        temperature: 0.45,
+        top_p: 0.90
+      });
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       out = postFormat(out);
-      showReplies([out]); pushHist(rawMsg, out); lux_pushRecentReply(out); return;
+      out = out.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
+      showReplies([out]);
+      pushHist(rawMsg, out);
+      lux_pushRecentReply(out);
+      luxSpeak(out);
+      return;
     }
 
     if (Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
       let out = await Safety.modelRefusal("meet", leftCard, rawMsg);
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       out = postFormat(out);
-      showReplies([out]); pushHist(rawMsg, out); lux_pushRecentReply(out); return;
+      out = out.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
+      showReplies([out]);
+      pushHist(rawMsg, out);
+      lux_pushRecentReply(out);
+      luxSpeak(out);
+      return;
     }
 
     if (Safety.wantsContact(rawMsg) || Safety.mentionsAddress(rawMsg)) {
-      let kind = Safety.mentionsAddress(rawMsg) ? "address" : "contact";
+      const kind = Safety.mentionsAddress(rawMsg) ? "address" : "contact";
       let out = await Safety.modelRefusal(kind, leftCard, rawMsg);
       out = postFormat(out);
-      showReplies([out]); pushHist(rawMsg, out); lux_pushRecentReply(out); return;
+      out = out.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
+      showReplies([out]);
+      pushHist(rawMsg, out);
+      lux_pushRecentReply(out);
+      luxSpeak(out);
+      return;
     }
 
     const system = buildSystemPrompt(leftCard, (GM_getValue("lux_persona", "") || "").trim(), imageNotes);
@@ -1814,12 +2141,19 @@ async function lux_ensureAccess() {
     const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
     const messages = [{ role: "system", content: system }, ...historyForModel, { role: "user", content: rawMsg }];
     const api = GM_getValue("lux_api_url", API_URL_DEFAULT).trim();
-    const headers = { "Content-Type": "application/json" };
     const key = lux_getApiKey().trim();
-    if (!key) { errorReply("Missing OpenRouter API key. Open LUX Settings and paste your key."); return; }
-    headers["Authorization"] = "Bearer " + key;
-    headers["HTTP-Referer"] = location.origin;
-    headers["X-Title"] = document.title || "LUX Userscript";
+
+    if (!key) {
+      errorReply("Missing OpenRouter API key. Open LUX Settings and paste your key.");
+      return;
+    }
+
+    const headers = {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + key,
+      "HTTP-Referer": location.origin,
+      "X-Title": document.title || "LUX Userscript"
+    };
 
     let payload = sanitizePayloadForModel({
       model: chosenModel,
@@ -1847,12 +2181,10 @@ async function lux_ensureAccess() {
       }
 
       let raw = parseOpenRouterContent(res1.responseText);
-
       if (!raw) {
         const res2 = await gmPostJSON(api, headers, payload, REQUEST_TIMEOUT_MS);
         raw = parseOpenRouterContent(res2.responseText);
       }
-
       if (!raw) {
         notify("No reply generated. Tap regenerate.");
         return;
@@ -1860,9 +2192,15 @@ async function lux_ensureAccess() {
 
       let content = raw;
       content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
-      content = postFormat(content);
 
-      // CPE: regenerate once if too similar to last replies
+      const reaction = luxHumanReaction(`${rawMsg}|${chosenModel}`);
+      if (reaction && !/^\s*(that|i|you|now)\b/i.test(content)) {
+        content = `${reaction} ${content}`;
+      }
+
+      content = postFormat(content);
+      content = content.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
+
       const recentBlob = lux_getRecentReplies().join(" ");
       if (overlapScore(content, recentBlob) > 0.12) {
         payload = sanitizePayloadForModel({
@@ -1877,6 +2215,7 @@ async function lux_ensureAccess() {
           let retry = rawR;
           retry = await Safety.enforceNoMeetAccept(rawMsg, retry, leftCard);
           retry = postFormat(retry);
+          retry = retry.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
           content = retry;
         }
       }
@@ -1885,15 +2224,18 @@ async function lux_ensureAccess() {
       showReplies([content]);
       pushHist(rawMsg, content);
       lux_pushRecentReply(content);
-
+      luxSpeak(content);
     } catch (e) {
       errorReply("Network error talking to OpenRouter.");
     }
   }
 
   function pushHist(user, assistant) {
-    shortHistory.push({ role: "user", content: stripStampsAll(user) }, { role: "assistant", content: postFormat(assistant) });
-    if (shortHistory.length > HISTORY_MAX) shortHistory.shift();
+    shortHistory.push(
+      { role: "user", content: stripStampsAll(user) },
+      { role: "assistant", content: postFormat(assistant) }
+    );
+    while (shortHistory.length > HISTORY_MAX) shortHistory.shift();
     _saveHistory();
   }
 
@@ -1930,13 +2272,19 @@ async function lux_ensureAccess() {
 
   async function pasteToSite(text) {
     const el = siteInput();
-    if (!el) { notify("Reply box not found. Update selector."); return false; }
-    el.scrollIntoView({ block: "nearest" }); el.click(); el.focus();
+    if (!el) {
+      notify("Reply box not found. Update selector.");
+      return false;
+    }
+    el.scrollIntoView({ block: "nearest" });
+    el.click();
+    el.focus();
     const final = clampToLimit(stripStampsAll(text));
     setNativeValue(el, final);
     try { el.selectionStart = el.selectionEnd = el.value.length; } catch {}
     fireTypingEvents(el);
-    if (typeof queueMicrotask === "function") queueMicrotask(() => fireTypingEvents(el)); else setTimeout(() => fireTypingEvents(el), 0);
+    if (typeof queueMicrotask === "function") queueMicrotask(() => fireTypingEvents(el));
+    else setTimeout(() => fireTypingEvents(el), 0);
     return true;
   }
 
@@ -1962,26 +2310,24 @@ async function lux_ensureAccess() {
     GM_setValue("lux_api_url", ui.apiUrl.value.trim());
     lux_setApiKey(ui.apiKey.value.trim());
     GM_setValue("lux_model", ui.model.value.trim());
-    GM_setValue("lux_provider", ui.provider.value.trim());
     GM_setValue("lux_persona", ui.persona.value.trim());
-    GM_setValue("lux_excuse_via_model", ui.excuseViaModel && ui.excuseViaModel.checked ? 1 : 0);
-    GM_setValue("lux_filter_enabled", ui.filterEnabled && ui.filterEnabled.checked ? 1 : 0);
+    GM_setValue("lux_voice_enabled", ui.voiceEnabled.checked ? 1 : 0);
+    GM_setValue("lux_voice_gender", ui.voiceGender.value || "female");
     LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || "default"), countryLabel: parseProfileCountry() || "—" });
     LUXSettingsDirty = false;
     alert("Saved");
   });
 
-  ui.apiUrl.addEventListener("input", () => { LUXSettingsDirty = true; });
-  ui.apiKey.addEventListener("input", () => { LUXSettingsDirty = true; });
-  ui.model.addEventListener("input", () => { LUXSettingsDirty = true; });
-  ui.provider.addEventListener("input", () => { LUXSettingsDirty = true; });
-  ui.persona.addEventListener("input", () => { LUXSettingsDirty = true; });
-  ui.excuseViaModel.addEventListener("change", () => { LUXSettingsDirty = true; });
-  ui.filterEnabled.addEventListener("change", () => { LUXSettingsDirty = true; });
+  [ui.apiUrl, ui.apiKey, ui.model, ui.persona].forEach(el => el.addEventListener("input", () => { LUXSettingsDirty = true; }));
+  ui.voiceEnabled.addEventListener("change", () => { LUXSettingsDirty = true; });
+  ui.voiceGender.addEventListener("change", () => { LUXSettingsDirty = true; });
 
   ui.send.addEventListener("click", async () => {
     const msg = stripStampsAll((ui.customer.value || "").trim());
-    if (!msg) { notify("Type a message first."); return; }
+    if (!msg) {
+      notify("Type a message first.");
+      return;
+    }
     await callBackend(msg);
   });
 
@@ -2000,12 +2346,15 @@ async function lux_ensureAccess() {
         _saveHistory();
       }
       await callBackend(msg);
-    } finally { ui.regen.disabled = false; }
+    } finally {
+      ui.regen.disabled = false;
+    }
   };
 
   function processLatestTurn() {
     const root = document.querySelector(THREAD_SEL);
     if (!root) return;
+
     const nodes = [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
     const turns = [];
     for (const row of nodes) {
@@ -2013,6 +2362,7 @@ async function lux_ensureAccess() {
       const content = extractMessageContent(row);
       if (content) turns.push({ role: fromClient ? "user" : "assistant", content: stripStampsKeepMeta(content) });
     }
+
     const lastUser = turns.slice().reverse().find(t => t.role === "user");
     if (!lastUser) return;
 
@@ -2022,7 +2372,10 @@ async function lux_ensureAccess() {
     lastSeen = cleanForUI;
 
     if (turns.length) {
-      shortHistory = turns.slice(-HISTORY_MAX).map(t => ({ role: t.role, content: stripStampsAll(extractLuxImageMeta(t.content || "").text || "") }));
+      shortHistory = turns.slice(-HISTORY_MAX).map(t => ({
+        role: t.role,
+        content: stripStampsAll(extractLuxImageMeta(t.content || "").text || "")
+      }));
       _saveHistory();
     }
 
@@ -2032,7 +2385,9 @@ async function lux_ensureAccess() {
     LUXPatch.UIChips.refresh({ modelLabel: (ui.model.value || "default"), countryLabel: parseProfileCountry() || "—" });
 
     for (const delay of LUX_NOTE_RETRY_DELAYS) {
-      setTimeout(() => { autoLogLatestClientInfo(cleanForUI).catch(err => console.warn("LUX member note draft error", err)); }, delay);
+      setTimeout(() => {
+        autoLogLatestClientInfo(cleanForUI).catch(err => console.warn("LUX member note draft error", err));
+      }, delay);
     }
 
     callBackend(lastUser.content);
@@ -2047,10 +2402,11 @@ async function lux_ensureAccess() {
     return true;
   }
 
+  luxInitVoices();
+
   if (!setupThreadWatcher()) {
     const fallbackId = setInterval(() => {
       if (setupThreadWatcher()) clearInterval(fallbackId);
     }, POLL_MS);
   }
-
 })();
