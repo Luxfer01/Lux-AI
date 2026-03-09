@@ -1632,83 +1632,117 @@ function luxShouldAddReaction(userMsg, replyText) {
     return t;
   }
 
-  function luxSentenceCase(text) {
-    let t = String(text || "").trim();
-    if (!t) return t;
-    t = t.replace(/\s+/g, " ");
-    t = t.replace(/(^|[.!?]\s+)([a-z])/g, (_, a, b) => a + b.toUpperCase());
-    t = t.replace(/\bi\b/g, "I");
-    return t;
+ function luxRepairPunctuation(text) {
+  let t = String(text || "");
+
+  // normalize punctuation clutter
+  t = t.replace(/[!]+/g, ".");
+  t = t.replace(/[:;()]/g, " ");
+  t = t.replace(/\.{2,}/g, ".");
+  t = t.replace(/\?{2,}/g, "?");
+  t = t.replace(/,{2,}/g, ",");
+
+  // fix mixed punctuation order
+  t = t.replace(/\.\s*,/g, ".");
+  t = t.replace(/,\s*\./g, ".");
+  t = t.replace(/,\s*\?/g, "?");
+  t = t.replace(/\.\s*\?/g, "?");
+  t = t.replace(/\?\s*\./g, "?");
+
+  // clean spacing around punctuation
+  t = t.replace(/\s*([,.?])\s*/g, "$1 ");
+  t = t.replace(/\s+,/g, ",");
+  t = t.replace(/\s+\./g, ".");
+  t = t.replace(/\s+\?/g, "?");
+
+  // remove punctuation stuck at line starts
+  t = t.replace(/(^|\s)[,.?]+(?=\s|$)/g, " ");
+
+  t = t.replace(/\s{2,}/g, " ").trim();
+  return t;
+}
+
+function luxSplitRunOns(text) {
+  let t = String(text || "").trim();
+  if (!t) return t;
+
+  // split obvious run-ons before pronoun restarts
+  t = t.replace(/\b(and|but|so)\s+(i|you|he|she|they|we)\b/gi, ". $2");
+  t = t.replace(/\b(i|you|he|she|they|we)\s+(i|you|he|she|they|we)\b/g, "$1. $2");
+
+  // split very long comma chains into sentences when needed
+  t = t.replace(/,\s+(i|you|he|she|they|we)\b/g, ". $1");
+
+  t = t.replace(/\s{2,}/g, " ").trim();
+  return t;
+}
+
+function luxEnsureSingleQuestion(text) {
+  let t = String(text || "").trim();
+  if (!t) return t;
+
+  const questions = t.match(/\?/g) || [];
+  if (questions.length <= 1) return t;
+
+  let seen = 0;
+  t = t.replace(/\?/g, () => {
+    seen += 1;
+    return seen === questions.length ? "?" : ".";
+  });
+
+  return t;
+}
+
+function luxEnsureEnding(text) {
+  let t = String(text || "").trim();
+  if (!t) return t;
+
+  // remove trailing commas or broken punctuation
+  t = t.replace(/[,\s]+$/g, "");
+  t = t.replace(/[.?,]{2,}$/g, m => m.includes("?") ? "?" : ".");
+
+  if (!/[.?]$/.test(t)) t += ".";
+  return t;
+}
+
+function luxSentenceCase(text) {
+  let t = String(text || "").trim();
+  if (!t) return t;
+
+  t = t.replace(/\s+/g, " ");
+  t = t.replace(/(^|[.!?]\s+)([a-z])/g, (_, a, b) => a + b.toUpperCase());
+  t = t.replace(/\bi\b/g, "I");
+
+  return t;
+}
+
+function postFormat(text) {
+  if (!text) return text;
+
+  let t = stripStampsAll(text);
+  t = toAscii(t);
+  t = enforceFeminineTone(t);
+  t = stripDisallowedPunct(t);
+  t = purgeBannedWords(t);
+  t = applyLexiconPrefs(t);
+  t = fixMissingApostrophes(t);
+
+  t = normalizeSpaces(t);
+  t = luxRepairPunctuation(t);
+  t = luxSplitRunOns(t);
+  t = luxEnsureSingleQuestion(t);
+  t = luxSentenceCase(t);
+  t = fixPronounI(t);
+  t = normalizeSpaces(t);
+  t = luxEnsureEnding(t);
+
+  if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") {
+    t = LUXPatch.NoRepeat.scrub(t);
   }
 
-  function luxRepairPunctuation(text) {
-    let t = String(text || "");
-    t = t.replace(/[!]+/g, ".");
-    t = t.replace(/[:;()]/g, " ");
-    t = t.replace(/\.{3,}/g, ".");
-    t = t.replace(/\?{2,}/g, "?");
-    t = t.replace(/,{2,}/g, ",");
-    t = t.replace(/\s*([,.?])\s*/g, "$1 ");
-    t = t.replace(/\s+,/g, ",");
-    t = t.replace(/\s+\./g, ".");
-    t = t.replace(/\s+\?/g, "?");
-    t = t.replace(/,\s*\./g, ".");
-    t = t.replace(/,\s*\?/g, "?");
-    t = t.replace(/\.\s*\?/g, "?");
-    t = t.replace(/\?\s*\./g, "?");
-    t = t.replace(/\s{2,}/g, " ").trim();
-    return t;
-  }
-
-  function luxSplitRunOns(text) {
-    let t = String(text || "");
-    t = t.replace(/\b(and|but|so)\s+(I|you|he|she|they|we)\b/g, (m, a, b) => `. ${b}`);
-    t = t.replace(/\b(I|You|He|She|They|We)\s+(I|You|He|She|They|We)\b/g, "$1. $2");
-    t = t.replace(/\.\s*\.\s*/g, ". ");
-    t = t.replace(/\s{2,}/g, " ").trim();
-    return t;
-  }
-
-  function luxEnsureSingleQuestion(text) {
-    let t = String(text || "").trim();
-    if (!t) return t;
-    const qCount = (t.match(/\?/g) || []).length;
-    if (qCount <= 1) return t;
-    let seen = 0;
-    t = t.replace(/\?/g, () => {
-      seen += 1;
-      return seen === qCount ? "?" : ".";
-    });
-    return t;
-  }
-
-  function luxEnsureEnding(text) {
-    let t = String(text || "").trim();
-    if (!t) return t;
-    if (!/[.?]$/.test(t)) t += ".";
-    return t;
-  }
-
-  function postFormat(text) {
-    if (!text) return text;
-    let t = stripStampsAll(text);
-    t = toAscii(t);
-    t = enforceFeminineTone(t);
-    t = stripDisallowedPunct(t);
-    t = purgeBannedWords(t);
-    t = applyLexiconPrefs(t);
-    t = fixMissingApostrophes(t);
-    t = luxRepairPunctuation(t);
-    t = luxSplitRunOns(t);
-    t = luxEnsureSingleQuestion(t);
-    t = luxSentenceCase(t);
-    t = fixPronounI(t);
-    t = normalizeSpaces(t);
-    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") t = LUXPatch.NoRepeat.scrub(t);
-    t = luxEnsureEnding(t);
-    return clampToLimit(t);
-  }
-
+  t = t.replace(/\s{2,}/g, " ").trim();
+  return clampToLimit(t);
+}
   function parseOpenRouterContent(responseText) {
     try {
       const data = JSON.parse(responseText || "{}");
@@ -2237,6 +2271,16 @@ function luxShouldAddReaction(userMsg, replyText) {
 }
 
       content = postFormat(content);
+        content = content
+  .replace(/\s+,/g, ",")
+  .replace(/\s+\./g, ".")
+  .replace(/\s+\?/g, "?")
+  .replace(/,\s*\./g, ".")
+  .replace(/,\s*\?/g, "?")
+  .replace(/\.\s*\?/g, "?")
+  .replace(/\?\s*\./g, "?")
+  .replace(/\s{2,}/g, " ")
+  .trim();
       content = content.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
 
       const recentBlob = lux_getRecentReplies().join(" ");
