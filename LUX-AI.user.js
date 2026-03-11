@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.0
-// @description  LUX cleaned and upgraded: stricter PI logging, clearer male or female voice replies, stronger punctuation cleanup, richer curiosity themes, anti-template conversation flow, right-box member-note drafting, creative varied refusals.
+// @version      14.6.1
+// @description  LUX upgraded with RP model stack, safer meetup lock, stronger anti-repeat memory, steadier voice, smarter reaction control, and cleaner fact logging.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -169,61 +169,119 @@ async function lux_ensureAccess() {
   const LUX_IMG_END = "LUX_IMG_NOTES_END";
 
   const MODEL_FALLBACK_PRESET = { temperature: 0.58, top_p: 0.92, repetition_penalty: 1.02, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 11 };
+
   const MODEL_PRESETS = {
-    "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
-    "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
-    "openai/gpt-4.1-mini": { temperature: 0.62, top_p: 0.94, repetition_penalty: 1.02, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 29 },
-    "meta-llama/llama-3.3-8b-instruct:free": { temperature: 0.74, top_p: 0.97, repetition_penalty: 1.04, max_tokens: 230, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 71 },
-    "meta-llama/llama-3.3-70b-instruct:free": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 250, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 83 },
-    "deepseek/deepseek-chat": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
+    "x-ai/grok-4-fast": {
+      temperature: 0.75,
+      top_p: 0.97,
+      repetition_penalty: 1.02,
+      max_tokens: 260,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 37
+    },
+    "anthropic/claude-3.5-sonnet": {
+      temperature: 0.68,
+      top_p: 0.95,
+      repetition_penalty: 1.01,
+      max_tokens: 260,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 53
+    },
+    "openai/gpt-4.1-mini": {
+      temperature: 0.62,
+      top_p: 0.94,
+      repetition_penalty: 1.02,
+      max_tokens: 240,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 29
+    },
+    "deepseek/deepseek-chat": {
+      temperature: 1.0,
+      top_p: 0.98,
+      repetition_penalty: 1.02,
+      max_tokens: 280,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 41
+    },
+    "nousresearch/hermes-3-llama-3.1-405b": {
+      temperature: 0.9,
+      top_p: 0.92,
+      repetition_penalty: 1.01,
+      max_tokens: 300,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 67
+    },
+    "qwen/qwen-3-72b-instruct": {
+      temperature: 0.95,
+      top_p: 0.95,
+      repetition_penalty: 1.01,
+      max_tokens: 290,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 73
+    },
+    "cognitivecomputations/dolphin-2.9.3-mistral-24b-venice": {
+      temperature: 1.0,
+      top_p: 1.0,
+      repetition_penalty: 1.00,
+      max_tokens: 280,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 79
+    }
   };
 
   const LUX_RATE_WINDOW_MS = 10000;
   const LUX_RATE_MAX_REQ = 5;
   const LUX_RATE_LOG_KEY = "lux_req_log_v1";
   const LUX_CREATIVE_STATE_KEY = "lux_creative_state_v1";
+  const LUX_REPLY_FP_KEY = "lux_reply_fp_v2";
+  const LUX_THEME_MEMORY_KEY = "lux_theme_memory_v1";
+  const LUX_REACTION_COOLDOWN_KEY = "lux_reaction_cooldown_v1";
 
- function luxHumanReaction(seed) {
-  const HUMAN_REACTIONS = [
-    "That caught me off guard.",
-    "Now that made me smile.",
-    "I didn't expect you to say that.",
-    "That actually sounds interesting.",
-    "I can picture that.",
-    "That pulled me in a little.",
-    "You have a way of saying things.",
-    "That made me pause for a second."
-  ];
+  function luxHumanReaction(seed) {
+    const HUMAN_REACTIONS = [
+      "That caught me off guard.",
+      "Now that made me smile.",
+      "I didn't expect you to say that.",
+      "That actually sounds interesting.",
+      "I can picture that.",
+      "That pulled me in a little.",
+      "You have a way of saying things.",
+      "That made me pause for a second."
+    ];
 
-  const idx = Math.abs(hashStr(seed)) % HUMAN_REACTIONS.length;
-  return HUMAN_REACTIONS[idx];
-}
+    const idx = Math.abs(hashStr(seed)) % HUMAN_REACTIONS.length;
+    return HUMAN_REACTIONS[idx];
+  }
 
-function luxShouldAddReaction(userMsg, replyText) {
+  function luxShouldAddReaction(userMsg, replyText) {
+    const u = String(userMsg || "").toLowerCase().trim();
+    const r = String(replyText || "").toLowerCase().trim();
 
-  const u = String(userMsg || "").toLowerCase().trim();
-  const r = String(replyText || "").toLowerCase().trim();
+    if (!u || !r) return false;
 
-  if (!u || !r) return false;
+    if (/^(that caught me off guard|now that made me smile|i didn't expect you to say that|that actually sounds interesting|i can picture that|that pulled me in a little|you have a way of saying things|that made me pause for a second)\b/i.test(r)) {
+      return false;
+    }
 
-  if (/^(that caught me off guard|now that made me smile|i didn't expect you to say that|that actually sounds interesting|i can picture that|that pulled me in a little|you have a way of saying things|that made me pause for a second)\b/i.test(r)) {
+    if (/^(hi|hello|hey|heyy|yo|sup|good morning|good afternoon|good evening)\b/i.test(u)) {
+      return false;
+    }
+
+    if (/\b(number|contact|whatsapp|telegram|address|meet|meet up|available|free)\b/i.test(u)) {
+      return false;
+    }
+
+    const lastReactionAt = Number(GM_getValue(LUX_REACTION_COOLDOWN_KEY, 0)) || 0;
+    if (Date.now() - lastReactionAt < 12 * 60 * 1000) {
+      return false;
+    }
+
+    if (/\b(confess|admit|miss you|thinking about you|lonely|divorce|widowed|lost|love|kiss|touch|naughty|dream|remember|memory|hurt|angry|upset|excited|curious|surprised|photo|picture)\b/i.test(u)) {
+      return true;
+    }
+
     return false;
   }
-
-  if (/^(hi|hello|hey|heyy|yo|sup|good morning|good afternoon|good evening)\b/i.test(u)) {
-    return false;
-  }
-
-  if (/\b(number|contact|whatsapp|telegram|address|meet|meet up|available|free)\b/i.test(u)) {
-    return false;
-  }
-
-  if (/\b(confess|admit|miss you|thinking about you|lonely|divorce|widowed|lost|love|kiss|touch|naughty|dream|remember|memory|hurt|angry|upset|excited|curious|surprised|photo|picture)\b/i.test(u)) {
-    return true;
-  }
-
-  return false;
-}
 
   const LUX_CONVERSATION_THEMES = [
     "memory",
@@ -640,6 +698,16 @@ function luxShouldAddReaction(userMsg, replyText) {
     return normalizeLooseText(t);
   }
 
+  function luxCleanLocationCapture(v) {
+    let t = String(v || "").trim();
+    t = t.split(/\b(?:and you|what about you|how about you|you)\b/i)[0];
+    t = t.split(/[!?]/)[0];
+    t = t.split(/\b(?:because|while|but|so)\b/i)[0];
+    t = t.replace(/^[,\s\-]+|[,\s\-]+$/g, "").trim();
+    t = t.replace(/[^A-Za-z0-9\s,\-]/g, "").trim();
+    return normalizeLooseText(t);
+  }
+
   function luxCleanJobValue(v) {
     let t = cleanupNoteValue(v);
     t = t.split(/\b(?:and|but|so|because)\b/i)[0].trim();
@@ -744,7 +812,7 @@ function luxShouldAddReaction(userMsg, replyText) {
       /\bi'?m\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})/i,
       /\bi\s+stay\s+in\s+([A-Za-z][A-Za-z\s\-\.,]{1,60})/i,
       /\bmy\s+address\s+is\s+([A-Za-z0-9][A-Za-z0-9\s,\-#\.]{3,100})/i
-    ], luxCleanLocationValue);
+    ], luxCleanLocationCapture);
 
     if (location) {
       if (/\d/.test(location) && /(street|st\b|road|rd\b|avenue|ave\b|apartment|apt\b|house|close|crescent|lane|drive|dr\b|boulevard|blvd\b)/i.test(location)) facts.Address = location;
@@ -1084,8 +1152,67 @@ function luxShouldAddReaction(userMsg, replyText) {
     } catch {}
   }
 
+  function lux_replyFpKey() {
+    try { return `${_threadKey()}__${LUX_REPLY_FP_KEY}`; }
+    catch { return LUX_REPLY_FP_KEY; }
+  }
+
+  function lux_getReplyFingerprints() {
+    try {
+      const arr = JSON.parse(GM_getValue(lux_replyFpKey(), "[]"));
+      return Array.isArray(arr) ? arr.slice(-12) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function lux_pushReplyFingerprint(text) {
+    try {
+      const fp = normalizeForCompare(text).split(" ").slice(0, 24).join(" ");
+      if (!fp) return;
+      const arr = lux_getReplyFingerprints();
+      arr.push(fp);
+      while (arr.length > 12) arr.shift();
+      GM_setValue(lux_replyFpKey(), JSON.stringify(arr));
+    } catch {}
+  }
+
+  function lux_isTooSimilarToRecent(text) {
+    const current = normalizeForCompare(text).split(" ").slice(0, 24).join(" ");
+    if (!current) return false;
+    return lux_getReplyFingerprints().some(old => overlapScore(current, old) > 0.55);
+  }
+
+  function lux_themeMemoryKey() {
+    try { return `${_threadKey()}__${LUX_THEME_MEMORY_KEY}`; }
+    catch { return LUX_THEME_MEMORY_KEY; }
+  }
+
+  function lux_getThemeMemory() {
+    try {
+      const arr = JSON.parse(GM_getValue(lux_themeMemoryKey(), "[]"));
+      return Array.isArray(arr) ? arr.slice(-5) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function lux_pushThemeMemory(theme) {
+    try {
+      const arr = lux_getThemeMemory();
+      arr.push(theme);
+      while (arr.length > 5) arr.shift();
+      GM_setValue(lux_themeMemoryKey(), JSON.stringify(arr));
+    } catch {}
+  }
+
   function luxPickConversationTheme(seedText = "") {
-    return LUX_CONVERSATION_THEMES[Math.abs(hashStr(seedText || String(Date.now()))) % LUX_CONVERSATION_THEMES.length];
+    const recent = new Set(lux_getThemeMemory());
+    const pool = LUX_CONVERSATION_THEMES.filter(t => !recent.has(t));
+    const source = pool.length ? pool : LUX_CONVERSATION_THEMES;
+    const picked = source[Math.abs(hashStr(seedText || String(Date.now()))) % source.length];
+    lux_pushThemeMemory(picked);
+    return picked;
   }
 
   function luxQuestionFromTheme(theme) {
@@ -1113,15 +1240,18 @@ function luxShouldAddReaction(userMsg, replyText) {
   }
 
   function luxQuestionGuide(tone, engagement, userText) {
-    const theme = luxPickConversationTheme(`${userText}|${tone}|${engagement}`);
+    const theme = luxPickConversationTheme(`${userText}|${tone}|${engagement}|${Date.now()}`);
     const sample = luxQuestionFromTheme(theme);
+
     let base = [
       "End with exactly one open ended question only if it feels natural.",
       "The question must feel human, unique, and easy to answer.",
       "Avoid templated patterns like wildest, craziest, most spontaneous, most adventurous, tell me about yourself, how was your day, or what are you up to.",
       "Use curiosity, memory, emotion, story, opinions, values, future, humor, work, travel, food, music, relationships, growth, beliefs, childhood, or dreams.",
+      "Do not reuse a question shape from recent replies.",
       `A good direction for this reply would sound like this, ${sample}`
     ].join(" ");
+
     if (tone === "angry") base += " Their tone is tense, ask something calm that helps them explain what actually bothered them.";
     else if (tone === "cold") base += " Their tone is dry, make the question light and easy, but still a little personal.";
     else if (tone === "serious") base += " Their tone is serious, ask something thoughtful and specific.";
@@ -1129,6 +1259,7 @@ function luxShouldAddReaction(userMsg, replyText) {
     else if (tone === "flirty") base += " Their tone is teasing, ask something playful and magnetic without sounding repetitive.";
     else if (tone === "playful") base += " Their tone is playful, ask something fun or a little unexpected.";
     else if (engagement === "low") base += " Keep it easy to answer, but not dull.";
+
     return base;
   }
 
@@ -1214,9 +1345,38 @@ function luxShouldAddReaction(userMsg, replyText) {
   function sanitizePayloadForModel(payload, model) {
     const m = (model || "").toLowerCase();
     const p = { ...payload };
+
     if ("transforms" in p) delete p.transforms;
     if ("logit_bias" in p && !p.logit_bias) delete p.logit_bias;
-    if (m.includes("llama-3.2-3b") && p.max_tokens > 260) p.max_tokens = 220;
+
+    if (m.includes("qwen/qwen-3-72b-instruct")) {
+      delete p.stop;
+      delete p.seed;
+      if ("repetition_penalty" in p) delete p.repetition_penalty;
+      p.temperature = Math.min(Number(p.temperature || 0.9), 0.88);
+      p.top_p = Math.min(Number(p.top_p || 0.95), 0.90);
+      p.max_tokens = Math.min(Number(p.max_tokens || 260), 240);
+    }
+
+    if (m.includes("dolphin-2.9.3-mistral-24b-venice")) {
+      delete p.stop;
+      delete p.seed;
+      if ("repetition_penalty" in p) delete p.repetition_penalty;
+      p.temperature = Math.min(Number(p.temperature || 1.0), 0.82);
+      p.top_p = Math.min(Number(p.top_p || 1.0), 0.88);
+      p.max_tokens = Math.min(Number(p.max_tokens || 260), 235);
+    }
+
+    if (m.includes("nousresearch/hermes-3-llama-3.1-405b")) {
+      p.temperature = Math.min(Number(p.temperature || 0.9), 0.78);
+      p.top_p = Math.min(Number(p.top_p || 0.92), 0.88);
+      p.max_tokens = Math.min(Number(p.max_tokens || 300), 250);
+    }
+
+    if (m.includes("llama-3.2-3b") && p.max_tokens > 260) {
+      p.max_tokens = 220;
+    }
+
     return p;
   }
 
@@ -1245,6 +1405,18 @@ function luxShouldAddReaction(userMsg, replyText) {
     });
     ["what's the first thing", "whats the first thing", "what's on your mind", "whats on your mind", "most spontaneous", "wildest", "craziest"].forEach(x => banned.add(x));
     return Array.from(banned).slice(0, 160);
+  }
+
+  function luxViolatesMeetupBoundary(text) {
+    const t = String(text || "").toLowerCase();
+    return /\b(i'm free|i am free|i'm available|i am available|we can meet|let's meet|let us meet|we should meet|let's go out|we can grab coffee|we can go for drinks|come over|come through|pull up|where should we meet|what time works|tonight works|tomorrow works|i can meet you|i'd love to meet|i would love to meet)\b/i.test(t);
+  }
+
+  function luxNeedsHardMeetupRepair(userMsg, text) {
+    if (!userMsg || !text) return false;
+    const askedMeet = Safety.wantsMeet(userMsg) || Safety.wantsMeetSoft(userMsg) || Safety.wantsContact(userMsg) || Safety.mentionsAddress(userMsg);
+    if (!askedMeet) return false;
+    return luxViolatesMeetupBoundary(text);
   }
 
   function buildSystemPrompt(leftCard, customSystem, imageNotes) {
@@ -1292,12 +1464,22 @@ function luxShouldAddReaction(userMsg, replyText) {
 
     const photoContext = (imageNotes && imageNotes.trim()) ? ` The customer attached a photo. Safe notes about the photo, ${imageNotes.trim()}. Only reference what is in these notes, do not invent details.` : "";
     let flavor = "Keep the style balanced and human, match their energy, avoid scripted phrasing.";
-    if (modelName.startsWith("x-ai/grok-4")) flavor = "Lean into a witty, quick, slightly teasing vibe without being rude. Keep replies punchy and high energy.";
-    else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) flavor = "Lean into a softer, emotionally aware, romantic tone. Use gentle language but keep it grounded.";
-    else if (modelName.startsWith("openai/gpt-4.1-mini")) flavor = "Be clear, coherent, and highly responsive to their wording. Give specific answers before you pivot.";
-    else if (modelName.includes("llama-3.3-8b")) flavor = "Use simple, direct language and avoid overly long sentences. Keep it light and easy going.";
-    else if (modelName.includes("llama-3.3-70b")) flavor = "Be expressive and colorful but stay concise. Gently mirror the customer's energy.";
-    else if (modelName.includes("deepseek")) flavor = "Be natural and conversational, vary rhythm and wording. Avoid sounding instructional or formal.";
+
+    if (modelName.startsWith("x-ai/grok-4")) {
+      flavor = "Lean into a witty, quick, slightly teasing vibe without being rude. Keep replies punchy and high energy.";
+    } else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) {
+      flavor = "Lean into a softer, emotionally aware, romantic tone. Use gentle language but keep it grounded.";
+    } else if (modelName.startsWith("openai/gpt-4.1-mini")) {
+      flavor = "Be clear, coherent, and highly responsive to their wording. Give specific answers before you pivot.";
+    } else if (modelName.includes("deepseek/deepseek-chat")) {
+      flavor = "Be natural and conversational, strong at roleplay, with smooth scene flow, vivid emotion, and grounded dialogue. Avoid sounding instructional or formal.";
+    } else if (modelName.includes("nousresearch/hermes-3-llama-3.1-405b")) {
+      flavor = "Be richly expressive, emotionally intelligent, and very human. Use strong prose, natural chemistry, and immersive dialogue without becoming too long.";
+    } else if (modelName.includes("qwen/qwen-3-72b-instruct")) {
+      flavor = "Be coherent, emotionally steady, and natural. Keep the character voice strong, the flow smooth, and the language human rather than formal.";
+    } else if (modelName.includes("dolphin-2.9.3-mistral-24b-venice")) {
+      flavor = "Be playful, creative, and immersive. Lean into expressive roleplay dialogue, emotional tension, and vivid conversational rhythm while staying coherent.";
+    }
 
     if (customSystem && customSystem.trim()) return `${customSystem} ${card}`;
     return `${baseCore}${photoContext} ${flavor}${card}`;
@@ -1632,117 +1814,83 @@ function luxShouldAddReaction(userMsg, replyText) {
     return t;
   }
 
- function luxRepairPunctuation(text) {
-  let t = String(text || "");
-
-  // normalize punctuation clutter
-  t = t.replace(/[!]+/g, ".");
-  t = t.replace(/[:;()]/g, " ");
-  t = t.replace(/\.{2,}/g, ".");
-  t = t.replace(/\?{2,}/g, "?");
-  t = t.replace(/,{2,}/g, ",");
-
-  // fix mixed punctuation order
-  t = t.replace(/\.\s*,/g, ".");
-  t = t.replace(/,\s*\./g, ".");
-  t = t.replace(/,\s*\?/g, "?");
-  t = t.replace(/\.\s*\?/g, "?");
-  t = t.replace(/\?\s*\./g, "?");
-
-  // clean spacing around punctuation
-  t = t.replace(/\s*([,.?])\s*/g, "$1 ");
-  t = t.replace(/\s+,/g, ",");
-  t = t.replace(/\s+\./g, ".");
-  t = t.replace(/\s+\?/g, "?");
-
-  // remove punctuation stuck at line starts
-  t = t.replace(/(^|\s)[,.?]+(?=\s|$)/g, " ");
-
-  t = t.replace(/\s{2,}/g, " ").trim();
-  return t;
-}
-
-function luxSplitRunOns(text) {
-  let t = String(text || "").trim();
-  if (!t) return t;
-
-  // split obvious run-ons before pronoun restarts
-  t = t.replace(/\b(and|but|so)\s+(i|you|he|she|they|we)\b/gi, ". $2");
-  t = t.replace(/\b(i|you|he|she|they|we)\s+(i|you|he|she|they|we)\b/g, "$1. $2");
-
-  // split very long comma chains into sentences when needed
-  t = t.replace(/,\s+(i|you|he|she|they|we)\b/g, ". $1");
-
-  t = t.replace(/\s{2,}/g, " ").trim();
-  return t;
-}
-
-function luxEnsureSingleQuestion(text) {
-  let t = String(text || "").trim();
-  if (!t) return t;
-
-  const questions = t.match(/\?/g) || [];
-  if (questions.length <= 1) return t;
-
-  let seen = 0;
-  t = t.replace(/\?/g, () => {
-    seen += 1;
-    return seen === questions.length ? "?" : ".";
-  });
-
-  return t;
-}
-
-function luxEnsureEnding(text) {
-  let t = String(text || "").trim();
-  if (!t) return t;
-
-  // remove trailing commas or broken punctuation
-  t = t.replace(/[,\s]+$/g, "");
-  t = t.replace(/[.?,]{2,}$/g, m => m.includes("?") ? "?" : ".");
-
-  if (!/[.?]$/.test(t)) t += ".";
-  return t;
-}
-
-function luxSentenceCase(text) {
-  let t = String(text || "").trim();
-  if (!t) return t;
-
-  t = t.replace(/\s+/g, " ");
-  t = t.replace(/(^|[.!?]\s+)([a-z])/g, (_, a, b) => a + b.toUpperCase());
-  t = t.replace(/\bi\b/g, "I");
-
-  return t;
-}
-
-function postFormat(text) {
-  if (!text) return text;
-
-  let t = stripStampsAll(text);
-  t = toAscii(t);
-  t = enforceFeminineTone(t);
-  t = stripDisallowedPunct(t);
-  t = purgeBannedWords(t);
-  t = applyLexiconPrefs(t);
-  t = fixMissingApostrophes(t);
-
-  t = normalizeSpaces(t);
-  t = luxRepairPunctuation(t);
-  t = luxSplitRunOns(t);
-  t = luxEnsureSingleQuestion(t);
-  t = luxSentenceCase(t);
-  t = fixPronounI(t);
-  t = normalizeSpaces(t);
-  t = luxEnsureEnding(t);
-
-  if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") {
-    t = LUXPatch.NoRepeat.scrub(t);
+  function luxSentenceCase(text) {
+    let t = String(text || "").trim();
+    if (!t) return t;
+    t = t.replace(/\s+/g, " ");
+    t = t.replace(/(^|[.!?]\s+)([a-z])/g, (_, a, b) => a + b.toUpperCase());
+    t = t.replace(/\bi\b/g, "I");
+    return t;
   }
 
-  t = t.replace(/\s{2,}/g, " ").trim();
-  return clampToLimit(t);
-}
+  function luxRepairPunctuation(text) {
+    let t = String(text || "");
+    t = t.replace(/[!]+/g, ".");
+    t = t.replace(/[:;()]/g, " ");
+    t = t.replace(/\.{3,}/g, ".");
+    t = t.replace(/\?{2,}/g, "?");
+    t = t.replace(/,{2,}/g, ",");
+    t = t.replace(/\s*([,.?])\s*/g, "$1 ");
+    t = t.replace(/\s+,/g, ",");
+    t = t.replace(/\s+\./g, ".");
+    t = t.replace(/\s+\?/g, "?");
+    t = t.replace(/,\s*\./g, ".");
+    t = t.replace(/,\s*\?/g, "?");
+    t = t.replace(/\.\s*\?/g, "?");
+    t = t.replace(/\?\s*\./g, "?");
+    t = t.replace(/\s{2,}/g, " ").trim();
+    return t;
+  }
+
+  function luxSplitRunOns(text) {
+    let t = String(text || "");
+    t = t.replace(/\b(and|but|so)\s+(I|you|he|she|they|we)\b/g, (m, a, b) => `. ${b}`);
+    t = t.replace(/\b(I|You|He|She|They|We)\s+(I|You|He|She|They|We)\b/g, "$1. $2");
+    t = t.replace(/\.\s*\.\s*/g, ". ");
+    t = t.replace(/\s{2,}/g, " ").trim();
+    return t;
+  }
+
+  function luxEnsureSingleQuestion(text) {
+    let t = String(text || "").trim();
+    if (!t) return t;
+    const qCount = (t.match(/\?/g) || []).length;
+    if (qCount <= 1) return t;
+    let seen = 0;
+    t = t.replace(/\?/g, () => {
+      seen += 1;
+      return seen === qCount ? "?" : ".";
+    });
+    return t;
+  }
+
+  function luxEnsureEnding(text) {
+    let t = String(text || "").trim();
+    if (!t) return t;
+    if (!/[.?]$/.test(t)) t += ".";
+    return t;
+  }
+
+  function postFormat(text) {
+    if (!text) return text;
+    let t = stripStampsAll(text);
+    t = toAscii(t);
+    t = enforceFeminineTone(t);
+    t = stripDisallowedPunct(t);
+    t = purgeBannedWords(t);
+    t = applyLexiconPrefs(t);
+    t = fixMissingApostrophes(t);
+    t = luxRepairPunctuation(t);
+    t = luxSplitRunOns(t);
+    t = luxEnsureSingleQuestion(t);
+    t = luxSentenceCase(t);
+    t = fixPronounI(t);
+    t = normalizeSpaces(t);
+    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") t = LUXPatch.NoRepeat.scrub(t);
+    t = luxEnsureEnding(t);
+    return clampToLimit(t);
+  }
+
   function parseOpenRouterContent(responseText) {
     try {
       const data = JSON.parse(responseText || "{}");
@@ -1863,23 +2011,30 @@ function postFormat(text) {
   function luxSpeak(text) {
     if (!GM_getValue("lux_voice_enabled", 0)) return;
     if (!("speechSynthesis" in window)) return;
+
     const clean = luxCleanTextForSpeech(text);
     if (!clean) return;
+
     try {
       const synth = window.speechSynthesis;
       synth.cancel();
+
       const utter = new SpeechSynthesisUtterance(clean);
       const gender = GM_getValue("lux_voice_gender", "female");
       const voice = luxPickBestVoice(gender);
+
       if (voice) {
         utter.voice = voice;
         utter.lang = voice.lang || "en-US";
       } else {
         utter.lang = "en-US";
       }
+
       utter.volume = 1;
-      utter.rate = 0.92;
-      utter.pitch = gender === "male" ? 0.92 : 1.0;
+      utter.rate = 0.88;
+      utter.pitch = gender === "male" ? 0.90 : 0.98;
+      utter.volume = 1;
+
       synth.speak(utter);
     } catch (e) {
       console.warn("LUX voice failed", e);
@@ -1969,9 +2124,10 @@ function postFormat(text) {
     "x-ai/grok-4-fast",
     "anthropic/claude-3.5-sonnet",
     "openai/gpt-4.1-mini",
-    "meta-llama/llama-3.3-8b-instruct:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-chat"
+    "deepseek/deepseek-chat",
+    "nousresearch/hermes-3-llama-3.1-405b",
+    "qwen/qwen-3-72b-instruct",
+    "cognitivecomputations/dolphin-2.9.3-mistral-24b-venice"
   ];
 
   let LUXSettingsDirty = false;
@@ -2097,6 +2253,7 @@ function postFormat(text) {
       showReplies([out]);
       pushHist(rawMsg, out);
       lux_pushRecentReply(out);
+      lux_pushReplyFingerprint(out);
       luxSpeak(out);
       return;
     }
@@ -2111,11 +2268,13 @@ function postFormat(text) {
         top_p: 0.88
       });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
+      if (luxNeedsHardMeetupRepair(rawMsg, line)) line = await Safety.modelRefusal("meet", leftCard, rawMsg);
       line = postFormat(line);
       line = line.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
       showReplies([line]);
       pushHist(rawMsg, line);
       lux_pushRecentReply(line);
+      lux_pushReplyFingerprint(line);
       luxSpeak(line);
       return;
     }
@@ -2130,11 +2289,13 @@ function postFormat(text) {
         top_p: 0.88
       });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
+      if (luxNeedsHardMeetupRepair(rawMsg, line)) line = await Safety.modelRefusal("meet", leftCard, rawMsg);
       line = postFormat(line);
       line = line.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
       showReplies([line]);
       pushHist(rawMsg, line);
       lux_pushRecentReply(line);
+      lux_pushReplyFingerprint(line);
       luxSpeak(line);
       return;
     }
@@ -2162,11 +2323,13 @@ function postFormat(text) {
         top_p: 0.90
       });
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
+      if (luxNeedsHardMeetupRepair(rawMsg, out)) out = await Safety.modelRefusal("meet", leftCard, rawMsg);
       out = postFormat(out);
       out = out.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
       showReplies([out]);
       pushHist(rawMsg, out);
       lux_pushRecentReply(out);
+      lux_pushReplyFingerprint(out);
       luxSpeak(out);
       return;
     }
@@ -2179,6 +2342,7 @@ function postFormat(text) {
       showReplies([out]);
       pushHist(rawMsg, out);
       lux_pushRecentReply(out);
+      lux_pushReplyFingerprint(out);
       luxSpeak(out);
       return;
     }
@@ -2191,6 +2355,7 @@ function postFormat(text) {
       showReplies([out]);
       pushHist(rawMsg, out);
       lux_pushRecentReply(out);
+      lux_pushReplyFingerprint(out);
       luxSpeak(out);
       return;
     }
@@ -2253,38 +2418,23 @@ function postFormat(text) {
 
       let content = raw;
       content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
+      if (luxNeedsHardMeetupRepair(rawMsg, content)) {
+        content = await Safety.modelRefusal("meet", leftCard, rawMsg);
+      }
 
-     if (luxShouldAddReaction(rawMsg, content)) {
-
-  const reaction = luxHumanReaction(`${rawMsg}|${chosenModel}`);
-
-  const useAsOpener = Math.random() < 0.12;
-
-  if (reaction) {
-    if (useAsOpener) {
-      content = `${reaction} ${content}`;
-    } else {
-      content = `${content} ${reaction}`;
-    }
-  }
-
-}
+      if (luxShouldAddReaction(rawMsg, content)) {
+        const reaction = luxHumanReaction(`${rawMsg}|${chosenModel}`);
+        if (reaction) {
+          content = `${content} ${reaction}`;
+          GM_setValue(LUX_REACTION_COOLDOWN_KEY, Date.now());
+        }
+      }
 
       content = postFormat(content);
-        content = content
-  .replace(/\s+,/g, ",")
-  .replace(/\s+\./g, ".")
-  .replace(/\s+\?/g, "?")
-  .replace(/,\s*\./g, ".")
-  .replace(/,\s*\?/g, "?")
-  .replace(/\.\s*\?/g, "?")
-  .replace(/\?\s*\./g, "?")
-  .replace(/\s{2,}/g, " ")
-  .trim();
       content = content.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
 
       const recentBlob = lux_getRecentReplies().join(" ");
-      if (overlapScore(content, recentBlob) > 0.12) {
+      if (overlapScore(content, recentBlob) > 0.12 || lux_isTooSimilarToRecent(content)) {
         payload = sanitizePayloadForModel({
           ...payload,
           temperature: Math.max(0.45, (payload.temperature || 0.7) - 0.12),
@@ -2296,6 +2446,9 @@ function postFormat(text) {
         if (rawR) {
           let retry = rawR;
           retry = await Safety.enforceNoMeetAccept(rawMsg, retry, leftCard);
+          if (luxNeedsHardMeetupRepair(rawMsg, retry)) {
+            retry = await Safety.modelRefusal("meet", leftCard, rawMsg);
+          }
           retry = postFormat(retry);
           retry = retry.replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
           content = retry;
@@ -2306,6 +2459,7 @@ function postFormat(text) {
       showReplies([content]);
       pushHist(rawMsg, content);
       lux_pushRecentReply(content);
+      lux_pushReplyFingerprint(content);
       luxSpeak(content);
     } catch (e) {
       errorReply("Network error talking to OpenRouter.");
