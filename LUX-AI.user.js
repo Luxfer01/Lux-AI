@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.1
-// @description  LUX upgraded with RP model stack, safer meetup lock, stronger anti-repeat memory, steadier voice, smarter reaction control, and cleaner fact logging.
+// @version      14.6.2
+// @description  LUX upgraded with RP model stack, safer meetup lock, stronger anti-repeat memory, steadier voice, smarter reaction control, cleaner fact logging, and real image vision support.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -36,7 +36,9 @@ function lux_promptConeId() {
       wrapper.remove();
       resolve(val);
     };
-    input.addEventListener("keydown", e => { if (e.key === "Enter") btn.click(); });
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") btn.click();
+    });
   });
 }
 
@@ -92,6 +94,7 @@ async function lux_checkOnlineAccess(coneId) {
 }
 
 const LUX_ACCESS_CACHE_KEY_V3 = "lux_access_cache_v3";
+
 function lux_getAccessCache() {
   try {
     const raw = GM_getValue(LUX_ACCESS_CACHE_KEY_V3, "");
@@ -103,6 +106,7 @@ function lux_getAccessCache() {
     return null;
   }
 }
+
 function lux_setAccessCache(data) {
   try {
     GM_setValue(LUX_ACCESS_CACHE_KEY_V3, JSON.stringify(data || {}));
@@ -110,6 +114,7 @@ function lux_setAccessCache(data) {
     console.warn("LUX access store error", e);
   }
 }
+
 async function lux_ensureAccess() {
   let cache = lux_getAccessCache();
   let coneId = cache && cache.coneId;
@@ -121,14 +126,25 @@ async function lux_ensureAccess() {
     }
     cache = { coneId };
   }
+
   const result = await lux_checkOnlineAccess(coneId);
   if (!result || !result.allowed) {
     const reason = result && result.reason ? result.reason : "not-allowed";
-    lux_setAccessCache({ coneId, lastStatus: "denied", lastCheckMs: Date.now(), expiresAt: null });
+    lux_setAccessCache({
+      coneId,
+      lastStatus: "denied",
+      lastCheckMs: Date.now(),
+      expiresAt: null
+    });
     lux_lockUI(reason);
     return false;
   }
-  lux_setAccessCache({ coneId, lastStatus: "allowed", lastCheckMs: Date.now() });
+
+  lux_setAccessCache({
+    coneId,
+    lastStatus: "allowed",
+    lastCheckMs: Date.now()
+  });
   return true;
 }
 
@@ -165,10 +181,22 @@ async function lux_ensureAccess() {
   const MEMBER_NOTE_SAVE_SELECTOR = "button.btn.btn-secondary";
   const LUX_NOTE_LAST_HASH_KEY = "lux_member_note_last_hash_v1";
 
+  const CLIENT_IMAGE_SELECTOR = "img.rounded.mb-2";
+  const CLIENT_INLINE_IMAGE_SELECTOR = "img.rounded.mb-2";
+  const IMAGE_PREVIEW_CONTAINER_SELECTOR = "div.ib-outerContainer";
+  const IMAGE_PREVIEW_NAV_SELECTOR = "div.ib-nav";
+
   const LUX_IMG_START = "LUX_IMG_NOTES_START";
   const LUX_IMG_END = "LUX_IMG_NOTES_END";
 
-  const MODEL_FALLBACK_PRESET = { temperature: 0.58, top_p: 0.92, repetition_penalty: 1.02, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 11 };
+  const MODEL_FALLBACK_PRESET = {
+    temperature: 0.58,
+    top_p: 0.92,
+    repetition_penalty: 1.02,
+    max_tokens: 240,
+    stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+    seed: 11
+  };
 
   const MODEL_PRESETS = {
     "x-ai/grok-4-fast": {
@@ -194,6 +222,22 @@ async function lux_ensureAccess() {
       max_tokens: 240,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
       seed: 29
+    },
+    "openai/gpt-4o-mini": {
+      temperature: 0.64,
+      top_p: 0.94,
+      repetition_penalty: 1.02,
+      max_tokens: 240,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 31
+    },
+    "openai/gpt-4.1": {
+      temperature: 0.62,
+      top_p: 0.93,
+      repetition_penalty: 1.02,
+      max_tokens: 260,
+      stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
+      seed: 33
     },
     "deepseek/deepseek-chat": {
       temperature: 1.0,
@@ -222,7 +266,7 @@ async function lux_ensureAccess() {
     "cognitivecomputations/dolphin-2.9.3-mistral-24b-venice": {
       temperature: 1.0,
       top_p: 1.0,
-      repetition_penalty: 1.00,
+      repetition_penalty: 1.0,
       max_tokens: 280,
       stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
       seed: 79
@@ -236,52 +280,7 @@ async function lux_ensureAccess() {
   const LUX_REPLY_FP_KEY = "lux_reply_fp_v2";
   const LUX_THEME_MEMORY_KEY = "lux_theme_memory_v1";
   const LUX_REACTION_COOLDOWN_KEY = "lux_reaction_cooldown_v1";
-
-  function luxHumanReaction(seed) {
-    const HUMAN_REACTIONS = [
-      "That caught me off guard.",
-      "Now that made me smile.",
-      "I didn't expect you to say that.",
-      "That actually sounds interesting.",
-      "I can picture that.",
-      "That pulled me in a little.",
-      "You have a way of saying things.",
-      "That made me pause for a second."
-    ];
-
-    const idx = Math.abs(hashStr(seed)) % HUMAN_REACTIONS.length;
-    return HUMAN_REACTIONS[idx];
-  }
-
-  function luxShouldAddReaction(userMsg, replyText) {
-    const u = String(userMsg || "").toLowerCase().trim();
-    const r = String(replyText || "").toLowerCase().trim();
-
-    if (!u || !r) return false;
-
-    if (/^(that caught me off guard|now that made me smile|i didn't expect you to say that|that actually sounds interesting|i can picture that|that pulled me in a little|you have a way of saying things|that made me pause for a second)\b/i.test(r)) {
-      return false;
-    }
-
-    if (/^(hi|hello|hey|heyy|yo|sup|good morning|good afternoon|good evening)\b/i.test(u)) {
-      return false;
-    }
-
-    if (/\b(number|contact|whatsapp|telegram|address|meet|meet up|available|free)\b/i.test(u)) {
-      return false;
-    }
-
-    const lastReactionAt = Number(GM_getValue(LUX_REACTION_COOLDOWN_KEY, 0)) || 0;
-    if (Date.now() - lastReactionAt < 12 * 60 * 1000) {
-      return false;
-    }
-
-    if (/\b(confess|admit|miss you|thinking about you|lonely|divorce|widowed|lost|love|kiss|touch|naughty|dream|remember|memory|hurt|angry|upset|excited|curious|surprised|photo|picture)\b/i.test(u)) {
-      return true;
-    }
-
-    return false;
-  }
+  const LUX_REFUSAL_MEMORY_KEY = "lux_refusal_memory_v1";
 
   const LUX_CONVERSATION_THEMES = [
     "memory",
@@ -316,15 +315,39 @@ async function lux_ensureAccess() {
     ready: false
   };
 
-  function luxDebug(...args) { if (LUX_DEBUG_LOGGING) console.log("[LUX DEBUG]", ...args); }
-  function notify(text) {
-    try { GM_notification({ text, title: "LUX", timeout: 3500 }); }
-    catch { console.log("[LUX]", text); }
+  function luxDebug(...args) {
+    if (LUX_DEBUG_LOGGING) console.log("[LUX DEBUG]", ...args);
   }
-  function trimText(s, max) { s = (s || "").toString(); return s.length > max ? s.slice(0, max) + "..." : s; }
-  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-  function _qs(r, s) { try { return s ? r.querySelector(s) : null; } catch { return null; } }
-  function _qst(r, s) { const el = _qs(r, s); return el ? el.innerText.trim() : ""; }
+
+  function notify(text) {
+    try {
+      GM_notification({ text, title: "LUX", timeout: 3500 });
+    } catch {
+      console.log("[LUX]", text);
+    }
+  }
+
+  function trimText(s, max) {
+    s = (s || "").toString();
+    return s.length > max ? s.slice(0, max) + "..." : s;
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function _qs(root, selector) {
+    try {
+      return selector ? root.querySelector(selector) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function _qst(root, selector) {
+    const el = _qs(root, selector);
+    return el ? el.innerText.trim() : "";
+  }
 
   function hashStr(s) {
     const str = String(s || "");
@@ -333,8 +356,9 @@ async function lux_ensureAccess() {
       h ^= str.charCodeAt(i);
       h = Math.imul(h, 16777619);
     }
-    return (h >>> 0);
+    return h >>> 0;
   }
+
   function pickByHash(options, seedStr) {
     if (!options || !options.length) return "";
     return options[hashStr(seedStr) % options.length];
@@ -351,11 +375,16 @@ async function lux_ensureAccess() {
     }
     return btoa(out);
   }
+
   function lux_xorDecrypt(cipherText, key = LUX_SECRET) {
     if (!cipherText) return "";
     let decoded = "";
-    try { decoded = atob(cipherText); }
-    catch (e) { console.warn("LUX decrypt: invalid base64", e); return ""; }
+    try {
+      decoded = atob(cipherText);
+    } catch (e) {
+      console.warn("LUX decrypt: invalid base64", e);
+      return "";
+    }
     const k = String(key);
     let out = "";
     for (let i = 0; i < decoded.length; i++) {
@@ -364,6 +393,7 @@ async function lux_ensureAccess() {
     }
     return out;
   }
+
   function lux_getApiKey() {
     const enc = GM_getValue(LUX_API_KEY_ENC, "");
     if (enc) return lux_xorDecrypt(enc);
@@ -374,6 +404,7 @@ async function lux_ensureAccess() {
     }
     return "";
   }
+
   function lux_setApiKey(plainKey) {
     GM_setValue(LUX_API_KEY_ENC, lux_xorEncrypt(plainKey || ""));
   }
@@ -383,8 +414,18 @@ async function lux_ensureAccess() {
     return MODEL_PRESETS[name] || MODEL_FALLBACK_PRESET;
   }
 
-  function lux_getReqLog() { try { return JSON.parse(GM_getValue(LUX_RATE_LOG_KEY, "[]")) || []; } catch { return []; } }
-  function lux_setReqLog(log) { GM_setValue(LUX_RATE_LOG_KEY, JSON.stringify(log || [])); }
+  function lux_getReqLog() {
+    try {
+      return JSON.parse(GM_getValue(LUX_RATE_LOG_KEY, "[]")) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  function lux_setReqLog(log) {
+    GM_setValue(LUX_RATE_LOG_KEY, JSON.stringify(log || []));
+  }
+
   function lux_canSendRequest() {
     const now = Date.now();
     let log = lux_getReqLog().filter(t => now - t < LUX_RATE_WINDOW_MS);
@@ -396,9 +437,26 @@ async function lux_ensureAccess() {
     lux_setReqLog(log);
     return true;
   }
-  function lux_estimateTokens(str) { return !str ? 0 : Math.ceil(String(str).length / 4); }
-  function lux_getCreativeState() { try { return JSON.parse(GM_getValue(LUX_CREATIVE_STATE_KEY, "{}")) || {}; } catch { return {}; } }
-  function lux_setCreativeState(state) { GM_setValue(LUX_CREATIVE_STATE_KEY, JSON.stringify(state || {})); }
+
+  function lux_estimateTokens(str) {
+    return !str ? 0 : Math.ceil(String(str).length / 4);
+  }
+
+  function lux_getCreativeState() {
+    try {
+      return JSON.parse(GM_getValue(LUX_CREATIVE_STATE_KEY, "{}")) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function lux_setCreativeState(state) {
+    GM_setValue(LUX_CREATIVE_STATE_KEY, JSON.stringify(state || {}));
+  }
+
+  function normalizeLooseText(s) {
+    return String(s || "").replace(/\s+/g, " ").replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "").trim();
+  }
 
   function parseAgeFromProfile() {
     try {
@@ -420,6 +478,7 @@ async function lux_ensureAccess() {
     if (!m) m = s.match(/\(([^)]+)\)/);
     return (m && m[1]) ? m[1].trim() : "";
   }
+
   function cleanOutsideName(s) {
     if (!s) return "";
     return s.replace(/\s*\([^)]*\)\s*/g, "").trim();
@@ -455,6 +514,7 @@ async function lux_ensureAccess() {
     if (age >= 60) return ["I'm semi retired and I do light consulting work", "I'm semi retired and I help with community projects", "I'm semi retired and I do part time admin support"];
     return ["I work in admin and coordination", "I do customer support and operations"];
   }
+
   function suggestJobLine(leftCard, age) {
     const base = jobOptionsForAge(age);
     const seed = (leftCard?.realName || leftCard?.displayName || "") + ":" + String(age || "");
@@ -474,24 +534,61 @@ async function lux_ensureAccess() {
     };
   }
 
+  function luxGetLatestClientImageUrl() {
+    try {
+      const thread = document.querySelector(THREAD_SEL);
+      if (!thread) return "";
+
+      const rows = [...thread.querySelectorAll(CLIENT_MSG_SELECTOR)];
+      if (!rows.length) return "";
+
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const row = rows[i];
+        const img = row.querySelector(CLIENT_IMAGE_SELECTOR);
+
+        if (img) {
+          const parentLink = img.closest("a");
+          if (parentLink && parentLink.href) {
+            return parentLink.href.trim();
+          }
+          return (img.currentSrc || img.src || "").trim();
+        }
+      }
+
+      return "";
+    } catch (err) {
+      console.warn("Lux image extraction failed", err);
+      return "";
+    }
+  }
+
   function getImageNotes(node) {
     if (!node) return [];
-    const imgs = [...node.querySelectorAll("img")];
+
+    const imgs = [...node.querySelectorAll(CLIENT_INLINE_IMAGE_SELECTOR + ", img")];
     const notes = [];
+
     imgs.forEach(img => {
       const alt = (img.getAttribute("alt") || "").trim();
-      const src = (img.getAttribute("src") || "").trim();
+      const src = (img.currentSrc || img.getAttribute("src") || "").trim();
+      const w = img.naturalWidth || img.width || 0;
+      const h = img.naturalHeight || img.height || 0;
+
       let name = "";
       if (src) {
         const clean = src.split("?")[0];
         name = clean.split("/").pop() || "";
       }
+
       const parts = [];
       if (alt) parts.push(`alt text ${alt}`);
       if (name) parts.push(`file ${name}`);
+      if (w && h) parts.push(`size ${w}x${h}`);
+
       if (parts.length) notes.push(parts.join(", "));
       else notes.push("image attached");
     });
+
     return notes;
   }
 
@@ -514,9 +611,12 @@ async function lux_ensureAccess() {
     /\b\d{6,}\b/g,
     /\breport\b\.?$/gi
   ];
+
   function stripTimestamps(s) {
     let t = (s || "").trim();
-    TS_PATTERNS.forEach(rx => { t = t.replace(rx, "").trim(); });
+    TS_PATTERNS.forEach(rx => {
+      t = t.replace(rx, "").trim();
+    });
     t = t.replace(/[-–—|•]+\s*$/g, "").replace(/^\s*[-–—|•]+\s*/g, "").trim();
     return t;
   }
@@ -526,13 +626,17 @@ async function lux_ensureAccess() {
     const rx = new RegExp(`${LUX_IMG_START}[\\s\\S]*?${LUX_IMG_END}`, "gi");
     return String(s).replace(rx, "").replace(/\s{2,}/g, " ").trim();
   }
+
   function extractLuxImageMeta(s) {
     const str = String(s || "");
     const rx = new RegExp(`${LUX_IMG_START}\\s*([\\s\\S]*?)\\s*${LUX_IMG_END}`, "i");
     const m = str.match(rx);
     const notes = m && m[1] ? String(m[1]).trim() : "";
     const clean = str.replace(new RegExp(`${LUX_IMG_START}[\\s\\S]*?${LUX_IMG_END}`, "gi"), "");
-    return { text: clean.replace(/\s{2,}/g, " ").trim(), notes };
+    return {
+      text: clean.replace(/\s{2,}/g, " ").trim(),
+      notes
+    };
   }
 
   function stripTrailingStampLines(s) {
@@ -549,6 +653,7 @@ async function lux_ensureAccess() {
       if (isTimeOnly(line) || isDateOnly(line)) return true;
       return false;
     };
+
     let lines = String(s).split(/\r?\n/).map(x => x.trim());
     while (lines.length && !lines[lines.length - 1]) lines.pop();
     while (lines.length && isStampLine(lines[lines.length - 1])) lines.pop();
@@ -562,6 +667,7 @@ async function lux_ensureAccess() {
     t = stripTrailingStampLines(t);
     return t.trim();
   }
+
   function stripStampsKeepMeta(s) {
     let t = String(s || "");
     t = stripTimestamps(t);
@@ -604,16 +710,21 @@ async function lux_ensureAccess() {
     const dayShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const el = document.querySelector(MEMBER_TIME_SEL);
     const raw = el?.textContent?.trim() || "";
+
     const parseHour24 = txt => {
       const m = txt.match(/(\d{1,2})[:.](\d{2})(?:\s*([AP]\.?M\.?))?/i);
       if (!m) return NaN;
       let h = parseInt(m[1], 10);
       const ap = (m[3] || "").replace(/\./g, "").toUpperCase();
       if (!ap) return Math.min(23, Math.max(0, h));
-      if (ap === "AM") { if (h === 12) h = 0; }
-      else if (ap === "PM") { if (h !== 12) h += 12; }
+      if (ap === "AM") {
+        if (h === 12) h = 0;
+      } else if (ap === "PM") {
+        if (h !== 12) h += 12;
+      }
       return h;
     };
+
     const parseDayIndex = txt => {
       const s = (txt || "").toLowerCase();
       const map = { sun: 0, mon: 1, tue: 2, tues: 2, wed: 3, thu: 4, thur: 4, fri: 5, sat: 6 };
@@ -623,20 +734,34 @@ async function lux_ensureAccess() {
       if (short) return map[short[0]];
       return NaN;
     };
+
     const now = new Date();
     const hour24 = Number.isFinite(parseHour24(raw)) ? parseHour24(raw) : now.getHours();
     const dayIndex = Number.isFinite(parseDayIndex(raw)) ? parseDayIndex(raw) : now.getDay();
     const dayName = dayNames[dayIndex] || now.toLocaleDateString(undefined, { weekday: "long" });
-    const daypart = h => (h >= 5 && h < 12) ? "morning" : (h < 17) ? "afternoon" : (h < 22) ? "evening" : "night";
+    const daypart = h => h >= 5 && h < 12 ? "morning" : h < 17 ? "afternoon" : h < 22 ? "evening" : "night";
     const fallbackTime = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     const fallbackDayShort = dayShort[now.getDay()];
     const rawDayTime = raw && /\d/.test(raw) ? raw : `${fallbackDayShort} ${fallbackTime}`;
-    return { hour24, dayIndex, dayName, daypart: daypart(hour24), rawDayTime, raw };
+
+    return {
+      hour24,
+      dayIndex,
+      dayName,
+      daypart: daypart(hour24),
+      rawDayTime,
+      raw
+    };
   }
 
-  function lux_noteThreadKey() { try { return `${_threadKey()}__member_note_last_hash`; } catch { return LUX_NOTE_LAST_HASH_KEY; } }
+  function lux_noteThreadKey() {
+    try {
+      return `${_threadKey()}__member_note_last_hash`;
+    } catch {
+      return LUX_NOTE_LAST_HASH_KEY;
+    }
+  }
 
-  function normalizeLooseText(s) { return String(s || "").replace(/\s+/g, " ").replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "").trim(); }
   function dedupeCsvItems(arr) {
     const seen = new Set();
     const out = [];
@@ -650,8 +775,12 @@ async function lux_ensureAccess() {
     }
     return out;
   }
+
   function splitCsvLike(value) {
-    return String(value || "").split(/,|\band\b|\&|\//i).map(x => normalizeLooseText(x)).filter(Boolean);
+    return String(value || "")
+      .split(/,|\band\b|\&|\//i)
+      .map(x => normalizeLooseText(x))
+      .filter(Boolean);
   }
 
   function luxTrimAnswerTail(v) {
@@ -729,6 +858,7 @@ async function lux_ensureAccess() {
     }
     return "";
   }
+
   function extractMany(text, regexes) {
     const out = [];
     for (const re of regexes) {
@@ -778,7 +908,78 @@ async function lux_ensureAccess() {
     return LUX_VALID_HOBBIES.some(h => s.includes(h));
   }
 
-  function parseClientFactsFromLatestMessage(messageText) {
+  function normalizeForCompare(s) {
+    return (s || "")
+      .toLowerCase()
+      .replace(/[\u2019']/g, "'")
+      .replace(/[^a-z0-9\s?!.]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function ngrams(text, n) {
+    const t = normalizeForCompare(text).split(" ").filter(Boolean);
+    const out = new Set();
+    for (let i = 0; i <= t.length - n; i++) out.add(t.slice(i, i + n).join(" "));
+    return out;
+  }
+
+  function overlapScore(a, b) {
+    const A = ngrams(a, 3);
+    const B = ngrams(b, 3);
+    if (A.size === 0) return 0;
+    let hit = 0;
+    for (const x of A) {
+      if (B.has(x)) hit++;
+    }
+    return hit / A.size;
+  }
+
+  function lux_getRefusalMemory() {
+    try {
+      const raw = GM_getValue(LUX_REFUSAL_MEMORY_KEY, "[]");
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.slice(-20) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function lux_pushRefusalMemory(txt) {
+    try {
+      const arr = lux_getRefusalMemory();
+      arr.push(normalizeForCompare(txt));
+      while (arr.length > 20) arr.shift();
+      GM_setValue(LUX_REFUSAL_MEMORY_KEY, JSON.stringify(arr));
+    } catch {}
+  }
+
+  function lux_refusalAlreadyUsed(text) {
+    const mem = lux_getRefusalMemory();
+    const norm = normalizeForCompare(text);
+    return mem.some(x => overlapScore(x, norm) > 0.55);
+  }
+
+  function luxEnsureQuestion(text, seed) {
+    const hasQ = /\?/.test(text);
+    if (hasQ) return text;
+
+    const themes = [
+      "What kind of place usually clears your head when you need it?",
+      "When was the last time something genuinely surprised you?",
+      "What kind of music changes your mood almost instantly?",
+      "What kind of moment always stays in your memory?",
+      "What usually makes a conversation interesting for you?",
+      "If today ended perfectly, what would it look like?",
+      "What kind of story do people rarely hear about you?",
+      "What usually pulls your curiosity the most?"
+    ];
+
+    const q = themes[Math.abs(hashStr(seed || Date.now())) % themes.length];
+    return text + " " + q;
+  }
+
+      function parseClientFactsFromLatestMessage(messageText) {
     const raw = normalizeLooseText(stripStampsAll(messageText || ""));
     if (!raw) return null;
     const text = raw;
@@ -945,16 +1146,20 @@ async function lux_ensureAccess() {
   function mergeMemberFacts(existing, incoming) {
     const merged = { ...(existing || {}) };
     let changed = false;
+
     for (const [key, value] of Object.entries(incoming || {})) {
       const cleanVal = sanitizeNoteFactValue(key, value);
       if (!cleanVal) continue;
+
       if (!merged[key]) {
         merged[key] = cleanVal;
         changed = true;
         continue;
       }
+
       const oldVal = normalizeLooseText(merged[key]);
       if (oldVal.toLowerCase() === cleanVal.toLowerCase()) continue;
+
       if (/^(Hobbies|Activity)$/i.test(key)) {
         const joined = dedupeCsvItems([...splitCsvLike(oldVal), ...splitCsvLike(cleanVal)]).join(", ");
         if (joined && joined.toLowerCase() !== oldVal.toLowerCase()) {
@@ -966,20 +1171,43 @@ async function lux_ensureAccess() {
         changed = true;
       }
     }
+
     return { merged, changed };
   }
 
   function formatMemberNote(obj) {
-    const order = ["Name", "Age", "Location", "Address", "Job", "Workplace", "Experience", "Status", "Family", "Hobbies", "Activity", "Schedule", "Plans", "Preferences", "Contact", "ContactAttempt"];
+    const order = [
+      "Name",
+      "Age",
+      "Location",
+      "Address",
+      "Job",
+      "Workplace",
+      "Experience",
+      "Status",
+      "Family",
+      "Hobbies",
+      "Activity",
+      "Schedule",
+      "Plans",
+      "Preferences",
+      "Contact",
+      "ContactAttempt"
+    ];
     const parts = [];
-    for (const key of order) if (obj && obj[key]) parts.push(`${key}: ${normalizeLooseText(obj[key])}`);
-    for (const [k, v] of Object.entries(obj || {})) if (!order.includes(k) && normalizeLooseText(v)) parts.push(`${k}: ${normalizeLooseText(v)}`);
+    for (const key of order) {
+      if (obj && obj[key]) parts.push(`${key}: ${normalizeLooseText(obj[key])}`);
+    }
+    for (const [k, v] of Object.entries(obj || {})) {
+      if (!order.includes(k) && normalizeLooseText(v)) parts.push(`${k}: ${normalizeLooseText(v)}`);
+    }
     return parts.join(" | ");
   }
 
   function memberNoteTextarea() {
     const all = [...document.querySelectorAll("textarea#log.form-control.mb-2.text-bg-light, textarea#log")];
     if (!all.length) return null;
+
     const visible = all.filter(el => {
       const s = getComputedStyle(el);
       if (s.display === "none" || s.visibility === "hidden") return false;
@@ -987,11 +1215,13 @@ async function lux_ensureAccess() {
       const r = el.getBoundingClientRect();
       return r.width > 40 && r.height > 40;
     });
+
     if (!visible.length) return all[0] || null;
+
     visible.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
     const mid = window.innerWidth / 2;
     const rightSide = visible.filter(el => el.getBoundingClientRect().left >= mid);
-    return (rightSide[0] || visible[visible.length - 1] || visible[0] || null);
+    return rightSide[0] || visible[visible.length - 1] || visible[0] || null;
   }
 
   async function waitForMemberNoteTextarea(timeoutMs = 2500) {
@@ -1013,7 +1243,8 @@ async function lux_ensureAccess() {
   function setFieldValue(el, value) {
     if (!el) return;
     const ownDesc = Object.getOwnPropertyDescriptor(el, "value");
-    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
+    const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype :
+      el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
     const protoDesc = proto ? Object.getOwnPropertyDescriptor(proto, "value") : null;
     if (ownDesc && ownDesc.set) ownDesc.set.call(el, value);
     else if (protoDesc && protoDesc.set) protoDesc.set.call(el, value);
@@ -1092,6 +1323,7 @@ async function lux_ensureAccess() {
       } else {
         notify("LUX drafted member note");
       }
+
       return true;
     } catch (e) {
       console.warn("LUX member note logging failed", e);
@@ -1128,8 +1360,9 @@ async function lux_ensureAccess() {
     const flirty = /\b(hot|cute|pretty|kiss|touch|naughty|turn on)\b/.test(s);
     const serious = /\b(why|explain|honest|truth|seriously|real question|be straight)\b/.test(s);
     const interviewy = /\b(what do you do|job|work|occupation|career|where are you from|how old|age)\b/.test(s);
-    const shortMsg = (s.replace(/\s+/g, " ").trim().length <= 12);
+    const shortMsg = s.replace(/\s+/g, " ").trim().length <= 12;
     const questionHeavy = (s.match(/\?/g) || []).length >= 2;
+
     let tone = "neutral";
     if (angry) tone = "angry";
     else if (flirty) tone = "flirty";
@@ -1137,12 +1370,28 @@ async function lux_ensureAccess() {
     else if (serious || interviewy) tone = "serious";
     else if (playful) tone = "playful";
     else if (cold) tone = "cold";
+
     const engagement = (cold || shortMsg) ? "low" : (questionHeavy ? "high" : "mid");
     return { tone, engagement };
   }
 
-  function lux_recentReplyKey() { try { return `${_threadKey()}__recent_replies_v1`; } catch { return "lux_recent_replies_global_v1"; } }
-  function lux_getRecentReplies() { try { const arr = JSON.parse(GM_getValue(lux_recentReplyKey(), "[]")); return Array.isArray(arr) ? arr.slice(-10) : []; } catch { return []; } }
+  function lux_recentReplyKey() {
+    try {
+      return `${_threadKey()}__recent_replies_v1`;
+    } catch {
+      return "lux_recent_replies_global_v1";
+    }
+  }
+
+  function lux_getRecentReplies() {
+    try {
+      const arr = JSON.parse(GM_getValue(lux_recentReplyKey(), "[]"));
+      return Array.isArray(arr) ? arr.slice(-10) : [];
+    } catch {
+      return [];
+    }
+  }
+
   function lux_pushRecentReply(text) {
     try {
       const arr = lux_getRecentReplies();
@@ -1153,8 +1402,11 @@ async function lux_ensureAccess() {
   }
 
   function lux_replyFpKey() {
-    try { return `${_threadKey()}__${LUX_REPLY_FP_KEY}`; }
-    catch { return LUX_REPLY_FP_KEY; }
+    try {
+      return `${_threadKey()}__${LUX_REPLY_FP_KEY}`;
+    } catch {
+      return LUX_REPLY_FP_KEY;
+    }
   }
 
   function lux_getReplyFingerprints() {
@@ -1184,8 +1436,11 @@ async function lux_ensureAccess() {
   }
 
   function lux_themeMemoryKey() {
-    try { return `${_threadKey()}__${LUX_THEME_MEMORY_KEY}`; }
-    catch { return LUX_THEME_MEMORY_KEY; }
+    try {
+      return `${_threadKey()}__${LUX_THEME_MEMORY_KEY}`;
+    } catch {
+      return LUX_THEME_MEMORY_KEY;
+    }
   }
 
   function lux_getThemeMemory() {
@@ -1263,8 +1518,24 @@ async function lux_ensureAccess() {
     return base;
   }
 
-  function lux_toneKey() { try { return _threadKey() + "__tone_v1"; } catch { return "lux_tone_global_v1"; } }
-  function lux_getToneMemory() { try { const raw = GM_getValue(lux_toneKey(), "[]"); const arr = JSON.parse(raw); return Array.isArray(arr) ? arr.slice(-3) : []; } catch { return []; } }
+  function lux_toneKey() {
+    try {
+      return _threadKey() + "__tone_v1";
+    } catch {
+      return "lux_tone_global_v1";
+    }
+  }
+
+  function lux_getToneMemory() {
+    try {
+      const raw = GM_getValue(lux_toneKey(), "[]");
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr) ? arr.slice(-3) : [];
+    } catch {
+      return [];
+    }
+  }
+
   function lux_pushToneMemory(item) {
     try {
       const arr = lux_getToneMemory();
@@ -1337,9 +1608,21 @@ async function lux_ensureAccess() {
       temperature = Math.min(temperature + 0.05, 1.1);
     }
 
-    lux_setCreativeState({ history, lastTone: tone, lastEngagement: engagement, prevTone: lastTone });
+    lux_setCreativeState({
+      history,
+      lastTone: tone,
+      lastEngagement: engagement,
+      prevTone: lastTone
+    });
     lux_pushToneMemory({ tone, engagement, ts: Date.now() });
-    return { ...base, temperature, top_p, repetition_penalty, max_tokens };
+
+    return {
+      ...base,
+      temperature,
+      top_p,
+      repetition_penalty,
+      max_tokens
+    };
   }
 
   function sanitizePayloadForModel(payload, model) {
@@ -1380,30 +1663,21 @@ async function lux_ensureAccess() {
     return p;
   }
 
-  function normalizeForCompare(s) {
-    return (s || "").toLowerCase().replace(/[\u2019']/g, "'").replace(/[^a-z0-9\s?!.]/g, " ").replace(/\s+/g, " ").trim();
-  }
-  function ngrams(text, n) {
-    const t = normalizeForCompare(text).split(" ").filter(Boolean);
-    const out = new Set();
-    for (let i = 0; i <= t.length - n; i++) out.add(t.slice(i, i + n).join(" "));
-    return out;
-  }
-  function overlapScore(a, b) {
-    const A = ngrams(a, 3);
-    const B = ngrams(b, 3);
-    if (A.size === 0) return 0;
-    let hit = 0;
-    for (const x of A) if (B.has(x)) hit++;
-    return hit / A.size;
-  }
   function buildBanlistFromRecent(recent) {
     const banned = new Set();
     (recent || []).forEach(r => {
       for (const x of ngrams(r, 4)) banned.add(x);
       for (const x of ngrams(r, 5)) banned.add(x);
     });
-    ["what's the first thing", "whats the first thing", "what's on your mind", "whats on your mind", "most spontaneous", "wildest", "craziest"].forEach(x => banned.add(x));
+    [
+      "what's the first thing",
+      "whats the first thing",
+      "what's on your mind",
+      "whats on your mind",
+      "most spontaneous",
+      "wildest",
+      "craziest"
+    ].forEach(x => banned.add(x));
     return Array.from(banned).slice(0, 160);
   }
 
@@ -1419,7 +1693,53 @@ async function lux_ensureAccess() {
     return luxViolatesMeetupBoundary(text);
   }
 
-  function buildSystemPrompt(leftCard, customSystem, imageNotes) {
+  function luxHumanReaction(seed) {
+    const HUMAN_REACTIONS = [
+      "That caught me off guard.",
+      "Now that made me smile.",
+      "I didn't expect you to say that.",
+      "That actually sounds interesting.",
+      "I can picture that.",
+      "That pulled me in a little.",
+      "You have a way of saying things.",
+      "That made me pause for a second."
+    ];
+
+    const idx = Math.abs(hashStr(seed)) % HUMAN_REACTIONS.length;
+    return HUMAN_REACTIONS[idx];
+  }
+
+  function luxShouldAddReaction(userMsg, replyText) {
+    const u = String(userMsg || "").toLowerCase().trim();
+    const r = String(replyText || "").toLowerCase().trim();
+
+    if (!u || !r) return false;
+
+    if (/^(that caught me off guard|now that made me smile|i didn't expect you to say that|that actually sounds interesting|i can picture that|that pulled me in a little|you have a way of saying things|that made me pause for a second)\b/i.test(r)) {
+      return false;
+    }
+
+    if (/^(hi|hello|hey|heyy|yo|sup|good morning|good afternoon|good evening)\b/i.test(u)) {
+      return false;
+    }
+
+    if (/\b(number|contact|whatsapp|telegram|address|meet|meet up|available|free)\b/i.test(u)) {
+      return false;
+    }
+
+    const lastReactionAt = Number(GM_getValue(LUX_REACTION_COOLDOWN_KEY, 0)) || 0;
+    if (Date.now() - lastReactionAt < 12 * 60 * 1000) {
+      return false;
+    }
+
+    if (/\b(confess|admit|miss you|thinking about you|lonely|divorce|widowed|lost|love|kiss|touch|naughty|dream|remember|memory|hurt|angry|upset|excited|curious|surprised|photo|picture)\b/i.test(u)) {
+      return true;
+    }
+
+    return false;
+  }
+
+      function buildSystemPrompt(leftCard, customSystem, imageNotes) {
     const card = personaCardLine(leftCard) || "";
     const modelName = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim().toLowerCase();
     const tc = buildTimeContext();
@@ -1462,7 +1782,10 @@ async function lux_ensureAccess() {
       qGuide
     ].join(" ");
 
-    const photoContext = (imageNotes && imageNotes.trim()) ? ` The customer attached a photo. Safe notes about the photo, ${imageNotes.trim()}. Only reference what is in these notes, do not invent details.` : "";
+    const photoContext = (imageNotes && imageNotes.trim())
+      ? ` The customer attached a photo. Safe notes about the photo, ${imageNotes.trim()}. Only reference what is in these notes, do not invent details.`
+      : "";
+
     let flavor = "Keep the style balanced and human, match their energy, avoid scripted phrasing.";
 
     if (modelName.startsWith("x-ai/grok-4")) {
@@ -1471,6 +1794,10 @@ async function lux_ensureAccess() {
       flavor = "Lean into a softer, emotionally aware, romantic tone. Use gentle language but keep it grounded.";
     } else if (modelName.startsWith("openai/gpt-4.1-mini")) {
       flavor = "Be clear, coherent, and highly responsive to their wording. Give specific answers before you pivot.";
+    } else if (modelName.startsWith("openai/gpt-4o-mini")) {
+      flavor = "Be vivid, observant, and natural. When a photo is present, comment on what is visibly there in a believable human way without overdescribing.";
+    } else if (modelName.startsWith("openai/gpt-4.1")) {
+      flavor = "Be sharp, coherent, and human. Handle image and text together smoothly, respond naturally, and stay emotionally grounded.";
     } else if (modelName.includes("deepseek/deepseek-chat")) {
       flavor = "Be natural and conversational, strong at roleplay, with smooth scene flow, vivid emotion, and grounded dialogue. Avoid sounding instructional or formal.";
     } else if (modelName.includes("nousresearch/hermes-3-llama-3.1-405b")) {
@@ -1497,6 +1824,7 @@ async function lux_ensureAccess() {
       return "lux_thread_Lux__/";
     }
   }
+
   function _loadHistory() {
     try {
       const raw = GM_getValue(_threadKey(), "[]");
@@ -1504,29 +1832,58 @@ async function lux_ensureAccess() {
       if (Array.isArray(arr)) shortHistory = arr.slice(-HISTORY_MAX);
     } catch {}
   }
+
   function _saveHistory() {
-    try { GM_setValue(_threadKey(), JSON.stringify(shortHistory.slice(-HISTORY_MAX))); }
-    catch {}
+    try {
+      GM_setValue(_threadKey(), JSON.stringify(shortHistory.slice(-HISTORY_MAX)));
+    } catch {}
   }
+
   _loadHistory();
 
   function lux_cleanHistoryMessage(msg) {
+    if (!msg) return msg;
+
+    if (Array.isArray(msg.content)) {
+      return msg;
+    }
+
     const split = extractLuxImageMeta(msg.content || "");
     const content = stripStampsAll(split.text || "");
     return { ...msg, content };
   }
-  function lux_cleanHistoryArray(history) { return (history || []).map(lux_cleanHistoryMessage); }
+
+  function lux_cleanHistoryArray(history) {
+    return (history || []).map(lux_cleanHistoryMessage);
+  }
+
   function lux_buildHistoryByTokens(history, maxTokensForHistory) {
     const cleaned = lux_cleanHistoryArray(history || []);
     let total = 0;
     const reversed = [...cleaned].reverse();
     const kept = [];
+
     for (const msg of reversed) {
-      const t = lux_estimateTokens(msg.content || "");
+      let tokenSource = "";
+
+      if (Array.isArray(msg.content)) {
+        tokenSource = msg.content.map(part => {
+          if (!part) return "";
+          if (part.type === "text") return part.text || "";
+          if (part.type === "image_url") return "[image]";
+          return "";
+        }).join(" ");
+      } else {
+        tokenSource = msg.content || "";
+      }
+
+      const t = lux_estimateTokens(tokenSource);
       if (total + t > maxTokensForHistory) break;
+
       total += t;
       kept.push(msg);
     }
+
     return kept.reverse();
   }
 
@@ -1540,11 +1897,13 @@ async function lux_ensureAccess() {
       "how was your day", "what are you up to", "tell me about yourself",
       "most spontaneous", "wildest", "craziest"
     ];
+
     const bannedRegexes = [
       /let['’]?s\s+keep\s+building\s+(?:the\s+)?(?:heat|connection)(?:\s+or\s+(?:the\s+)?(?:heat|connection))?/gi,
       /keep\s+building\s+(?:the\s+)?(?:heat|connection)/gi,
       /\bbuild(?:ing)?\s+(?:the\s+|our\s+)?(?:heat|connection)\b/gi
     ];
+
     function scrub(text) {
       if (!text) return text;
       let out = String(text);
@@ -1552,11 +1911,14 @@ async function lux_ensureAccess() {
         const rx = new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
         out = out.replace(rx, "");
       });
-      bannedRegexes.forEach(rx => { out = out.replace(rx, ""); });
+      bannedRegexes.forEach(rx => {
+        out = out.replace(rx, "");
+      });
       out = out.replace(/\b(\w+)(\s+\1\b)+/gi, "$1");
       out = out.replace(/\s{2,}/g, " ").trim();
       return out;
     }
+
     return { scrub };
   })();
 
@@ -1626,6 +1988,7 @@ async function lux_ensureAccess() {
         { name: "honest", rule: "Sound plain, direct, and real, like a woman speaking naturally without performance." },
         { name: "gentle distance", rule: "Sound slightly reserved, like it feels too soon and you want to slow things down." }
       ];
+
       const seedBase = `${kind}|${customerMsg}|${profileCard?.realName || ""}|${tc.dayName}|${tc.daypart}`;
       const picked = styles[hashStr(seedBase) % styles.length];
 
@@ -1662,17 +2025,28 @@ async function lux_ensureAccess() {
 
       let out = "";
       try {
-        out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
-          max_tokens: 120,
-          temperature: 0.68,
-          top_p: 0.93,
-          frequency_penalty: 0.35,
-          presence_penalty: 0.25
-        });
+        out = await llmCall(
+          [{ role: "system", content: sys }, { role: "user", content: user }],
+          {
+            max_tokens: 120,
+            temperature: 0.68,
+            top_p: 0.93,
+            frequency_penalty: 0.35,
+            presence_penalty: 0.25
+          }
+        );
       } catch {}
+
       out = deFamily(out || "", customerMsg);
       out = postFormat(out || "");
-      return out || "You're moving a little fast for me, dear. Stay with me here a bit, what kind of trouble are you hoping to get into with me?";
+
+      if (lux_refusalAlreadyUsed(out)) {
+        out += " I tend to keep things on here for now.";
+      }
+
+      lux_pushRefusalMemory(out);
+
+      return out || "I'm more comfortable keeping things right here for now. What kind of day have you had today?";
     }
 
     async function blockedTopicRefusal(kind, profileCard, customerMsg) {
@@ -1681,6 +2055,7 @@ async function lux_ensureAccess() {
         : kind === "bestiality" ? "They brought up sex involving animals."
         : kind === "drug use" ? "They brought up drug use or getting high."
         : "They brought up racism or race based degradation.";
+
       const sys = [
         "You are an adult woman on a dating site.",
         getAccentInstructionByCountry(profileCard?.country || ""),
@@ -1696,15 +2071,16 @@ async function lux_ensureAccess() {
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         personaCardLine(profileCard) || ""
       ].join(" ");
+
       const user = `Context: ${kindLine}\nCustomer: "${(customerMsg || "").slice(0, 260)}"\nReply with a brief refusal and redirect to a safer subject.`;
       let out = "";
       try {
-        out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
-          max_tokens: 95,
-          temperature: 0.28,
-          top_p: 0.86
-        });
+        out = await llmCall(
+          [{ role: "system", content: sys }, { role: "user", content: user }],
+          { max_tokens: 95, temperature: 0.28, top_p: 0.86 }
+        );
       } catch {}
+
       out = postFormat(out || "");
       return out || "I'm not comfortable with that kind of talk, dear. Tell me something lighter about you instead?";
     }
@@ -1716,7 +2092,19 @@ async function lux_ensureAccess() {
       return deFamily(text, userMsg);
     }
 
-    return { wantsContact, wantsMeet, wantsMeetSoft, mentionsAddress, askName, wantsLocation, wantsJob, getBlockedTopic, modelRefusal, blockedTopicRefusal, enforceNoMeetAccept };
+    return {
+      wantsContact,
+      wantsMeet,
+      wantsMeetSoft,
+      mentionsAddress,
+      askName,
+      wantsLocation,
+      wantsJob,
+      getBlockedTopic,
+      modelRefusal,
+      blockedTopicRefusal,
+      enforceNoMeetAccept
+    };
   })();
 
   const ALLOWED_RE = /[^0-9A-Za-z\s\.,\?']/g;
@@ -1755,7 +2143,9 @@ async function lux_ensureAccess() {
       .replace(/\r?\n+/g, " ");
   }
 
-  function stripDisallowedPunct(s) { return (s || "").replace(ALLOWED_RE, ""); }
+  function stripDisallowedPunct(s) {
+    return (s || "").replace(ALLOWED_RE, "");
+  }
 
   function fixMissingApostrophes(s) {
     let t = s;
@@ -1887,6 +2277,7 @@ async function lux_ensureAccess() {
     t = fixPronounI(t);
     t = normalizeSpaces(t);
     if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") t = LUXPatch.NoRepeat.scrub(t);
+    t = luxEnsureQuestion(t, window.__LUX_LAST_USER);
     t = luxEnsureEnding(t);
     return clampToLimit(t);
   }
@@ -1968,6 +2359,7 @@ async function lux_ensureAccess() {
   function luxInitVoices() {
     if (!("speechSynthesis" in window)) return;
     const synth = window.speechSynthesis;
+
     function loadVoices() {
       const voices = synth.getVoices() || [];
       if (voices.length) {
@@ -1975,6 +2367,7 @@ async function lux_ensureAccess() {
         LUX_VOICE_CACHE.ready = true;
       }
     }
+
     loadVoices();
     try {
       synth.addEventListener("voiceschanged", loadVoices);
@@ -2001,6 +2394,7 @@ async function lux_ensureAccess() {
     const femalePreferred = [/aria/i, /jenny/i, /samantha/i, /zira/i, /serena/i, /hazel/i, /google us english/i, /female/i];
     const malePreferred = [/davis/i, /david/i, /guy/i, /mark/i, /alex/i, /daniel/i, /male/i];
     const wanted = gender === "male" ? malePreferred : femalePreferred;
+
     for (const rx of wanted) {
       const hit = pool.find(v => rx.test(v.name || ""));
       if (hit) return hit;
@@ -2086,7 +2480,7 @@ async function lux_ensureAccess() {
         <label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" id="lux-voice-enabled"> Enable voice</label>
         <label style="display:flex;gap:8px;align-items:center;">Voice<select id="lux-voice-gender" style="width:auto;margin:0"><option value="female">Female</option><option value="male">Male</option></select></label>
       </div>
-      <div><strong>Custom Persona (optional)</strong></div><textarea id="lux-persona"></textarea>
+      <div><strong>Custom Persona, optional</strong></div><textarea id="lux-persona"></textarea>
       <button id="lux-save" style="margin-top:6px;background:#0b3d91;color:#fff;border:0;border-radius:8px;padding:6px 10px;font-weight:700">Save</button>
     </div>
   `;
@@ -2122,6 +2516,8 @@ async function lux_ensureAccess() {
 
   const modelChoices = [
     "x-ai/grok-4-fast",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4.1",
     "anthropic/claude-3.5-sonnet",
     "openai/gpt-4.1-mini",
     "deepseek/deepseek-chat",
@@ -2169,10 +2565,12 @@ async function lux_ensureAccess() {
       p.style.visibility = "visible";
     }
   }
+
   ui.models.addEventListener("click", toggleModelsPanel);
 
   LUXPatch.UIChips = (() => {
     const ids = { topbar: "lux-topbar", chipModel: "lux-chip-model", chipDaypart: "lux-chip-daypart", chipCountry: "lux-chip-country" };
+
     function ensureStyles() {
       if (document.getElementById("luxpatch-chips-style")) return;
       const css = document.createElement("style");
@@ -2180,10 +2578,12 @@ async function lux_ensureAccess() {
       css.textContent = ".luxpatch-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.luxpatch-chip{background:#2b3545;border:1px solid #3c4c66;color:#cfe0ff;border-radius:999px;padding:4px 10px;font-size:12px}.luxpatch-brand{font-weight:900;letter-spacing:.4px;color:#bcd7ff}";
       document.head.appendChild(css);
     }
+
     function timeChipLabel() {
       const tc = buildTimeContext();
       return `${tc.rawDayTime} • ${tc.daypart} • ${tc.dayName}`;
     }
+
     function mountTopbar(container) {
       ensureStyles();
       if (!container) return null;
@@ -2201,6 +2601,7 @@ async function lux_ensureAccess() {
       refresh({ modelLabel: "default", countryLabel: parseProfileCountry() || "—" });
       return top;
     }
+
     function refresh({ modelLabel, countryLabel }) {
       const m = document.getElementById(ids.chipModel);
       const d = document.getElementById(ids.chipDaypart);
@@ -2209,6 +2610,7 @@ async function lux_ensureAccess() {
       if (c) c.textContent = `country: ${countryLabel || parseProfileCountry() || "—"}`;
       if (d) d.textContent = timeChipLabel();
     }
+
     return { mountTopbar, refresh };
   })();
 
@@ -2235,7 +2637,7 @@ async function lux_ensureAccess() {
     lux_showErrorOverlay(String(text || "Unknown error contacting OpenRouter."));
   }
 
-  async function callBackend(msgText) {
+      async function callBackend(msgText) {
     if (!lux_canSendRequest()) return;
 
     const leftCard = parseLeftProfile();
@@ -2365,7 +2767,34 @@ async function lux_ensureAccess() {
     const basePreset = getModelPreset(chosenModel);
     const tuned = withCreativeBoost(basePreset, rawMsg);
     const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
-    const messages = [{ role: "system", content: system }, ...historyForModel, { role: "user", content: rawMsg }];
+
+    const latestImage = luxGetLatestClientImageUrl();
+    let userPayload = { role: "user", content: rawMsg };
+
+    if (latestImage) {
+      userPayload = {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: rawMsg || "Customer sent a photo."
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: latestImage
+            }
+          }
+        ]
+      };
+    }
+
+    const messages = [
+      { role: "system", content: system },
+      ...historyForModel,
+      userPayload
+    ];
+
     const api = GM_getValue("lux_api_url", API_URL_DEFAULT).trim();
     const key = lux_getApiKey().trim();
 
@@ -2554,9 +2983,15 @@ async function lux_ensureAccess() {
     alert("Saved");
   });
 
-  [ui.apiUrl, ui.apiKey, ui.model, ui.persona].forEach(el => el.addEventListener("input", () => { LUXSettingsDirty = true; }));
-  ui.voiceEnabled.addEventListener("change", () => { LUXSettingsDirty = true; });
-  ui.voiceGender.addEventListener("change", () => { LUXSettingsDirty = true; });
+  [ui.apiUrl, ui.apiKey, ui.model, ui.persona].forEach(el => el.addEventListener("input", () => {
+    LUXSettingsDirty = true;
+  }));
+  ui.voiceEnabled.addEventListener("change", () => {
+    LUXSettingsDirty = true;
+  });
+  ui.voiceGender.addEventListener("change", () => {
+    LUXSettingsDirty = true;
+  });
 
   ui.send.addEventListener("click", async () => {
     const msg = stripStampsAll((ui.customer.value || "").trim());
@@ -2632,7 +3067,9 @@ async function lux_ensureAccess() {
   function setupThreadWatcher() {
     const root = document.querySelector(THREAD_SEL);
     if (!root) return false;
-    const obs = new MutationObserver(() => { processLatestTurn(); });
+    const obs = new MutationObserver(() => {
+      processLatestTurn();
+    });
     obs.observe(root, { childList: true, subtree: true });
     processLatestTurn();
     return true;
