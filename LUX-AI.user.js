@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.2
-// @description  LUX upgraded with RP model stack, safer meetup lock, stronger anti-repeat memory, steadier voice, smarter reaction control, cleaner fact logging, and real image vision support.
+// @version      14.6.3
+// @description  LUX upgraded with RP model stack, safer meetup lock, stronger anti-repeat memory, steadier voice, smarter reaction control, cleaner fact logging, real image vision support, latest-turn image focus, and improved punctuation.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -534,30 +534,20 @@ async function lux_ensureAccess() {
     };
   }
 
-  function luxGetLatestClientImageUrl() {
+  function luxGetLatestClientImageUrlFromMessage(messageNode) {
     try {
-      const thread = document.querySelector(THREAD_SEL);
-      if (!thread) return "";
+      if (!messageNode) return "";
+      const img = messageNode.querySelector(CLIENT_IMAGE_SELECTOR);
+      if (!img) return "";
 
-      const rows = [...thread.querySelectorAll(CLIENT_MSG_SELECTOR)];
-      if (!rows.length) return "";
-
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const row = rows[i];
-        const img = row.querySelector(CLIENT_IMAGE_SELECTOR);
-
-        if (img) {
-          const parentLink = img.closest("a");
-          if (parentLink && parentLink.href) {
-            return parentLink.href.trim();
-          }
-          return (img.currentSrc || img.src || "").trim();
-        }
+      const parentLink = img.closest("a");
+      if (parentLink && parentLink.href) {
+        return parentLink.href.trim();
       }
 
-      return "";
+      return (img.currentSrc || img.src || "").trim();
     } catch (err) {
-      console.warn("Lux image extraction failed", err);
+      console.warn("Lux image extraction from latest message failed", err);
       return "";
     }
   }
@@ -979,7 +969,7 @@ async function lux_ensureAccess() {
     return text + " " + q;
   }
 
-      function parseClientFactsFromLatestMessage(messageText) {
+    function parseClientFactsFromLatestMessage(messageText) {
     const raw = normalizeLooseText(stripStampsAll(messageText || ""));
     if (!raw) return null;
     const text = raw;
@@ -1739,7 +1729,7 @@ async function lux_ensureAccess() {
     return false;
   }
 
-      function buildSystemPrompt(leftCard, customSystem, imageNotes) {
+     function buildSystemPrompt(leftCard, customSystem, imageNotes) {
     const card = personaCardLine(leftCard) || "";
     const modelName = (GM_getValue("lux_model", MODEL_DEFAULT) || "").trim().toLowerCase();
     const tc = buildTimeContext();
@@ -1765,7 +1755,10 @@ async function lux_ensureAccess() {
       "Keep the tone soft, empathetic, and gently reassuring.",
       "Use concrete details over vague filler.",
       "Punctuation rule, only use comma, period, question mark, and apostrophe, no other symbols.",
-      "Always respond to the latest customer message.",
+      "Always respond to the latest customer message only.",
+      "When an image is present, treat it as attached to the latest customer message only.",
+      "Do not describe older photos, earlier uploads, or anything outside the latest customer turn.",
+      "If the latest customer message is mainly text, answer that text first, then mention the image naturally only if it helps.",
       "Avoid stock filler about building connection or heat.",
       "If you need to decline something, do it briefly and pivot into a new topic.",
       "Excuses can be everyday reasons like work focus, rest, timing, small chores, or low battery, avoid family excuses unless the customer mentions family first.",
@@ -2180,8 +2173,8 @@ async function lux_ensureAccess() {
 
   function normalizeSpaces(s) {
     let t = (s || "").replace(/\s+/g, " ");
-    t = t.replace(/\s+([,\.?])/g, "$1");
-    t = t.replace(/([,\.?])(?!\s|$)/g, "$1 ");
+    t = t.replace(/\s+([,\.!?])/g, "$1");
+    t = t.replace(/([,\.!?])(?!\s|$)/g, "$1 ");
     t = t.replace(/\s{2,}/g, " ");
     return t.trim();
   }
@@ -2192,7 +2185,7 @@ async function lux_ensureAccess() {
 
   function ensureTerminalPunct(s) {
     s = s.trim();
-    return s ? (/[\.?]$/.test(s) ? s : (s + ".")) : s;
+    return s ? (/[.!?]$/.test(s) ? s : (s + ".")) : s;
   }
 
   function enforceFeminineTone(s) {
@@ -2215,70 +2208,95 @@ async function lux_ensureAccess() {
 
   function luxRepairPunctuation(text) {
     let t = String(text || "");
-    t = t.replace(/[!]+/g, ".");
+
+    t = t.replace(/[!]{2,}/g, "!");
+    t = t.replace(/[?]{2,}/g, "?");
+    t = t.replace(/[.]{3,}/g, "...");
     t = t.replace(/[:;()]/g, " ");
-    t = t.replace(/\.{3,}/g, ".");
-    t = t.replace(/\?{2,}/g, "?");
-    t = t.replace(/,{2,}/g, ",");
-    t = t.replace(/\s*([,.?])\s*/g, "$1 ");
+
+    t = t.replace(/\s*([,.!?])\s*/g, "$1 ");
     t = t.replace(/\s+,/g, ",");
     t = t.replace(/\s+\./g, ".");
     t = t.replace(/\s+\?/g, "?");
+    t = t.replace(/\s+!/g, "!");
+    t = t.replace(/,\s*,+/g, ", ");
+    t = t.replace(/\.\s*\./g, ".");
+    t = t.replace(/\?\s*\?/g, "?");
+    t = t.replace(/!\s*!/g, "!");
+
     t = t.replace(/,\s*\./g, ".");
     t = t.replace(/,\s*\?/g, "?");
+    t = t.replace(/,\s*!/g, "!");
     t = t.replace(/\.\s*\?/g, "?");
+    t = t.replace(/\.\s*!/g, "!");
     t = t.replace(/\?\s*\./g, "?");
+    t = t.replace(/!\s*\./g, "!");
+
     t = t.replace(/\s{2,}/g, " ").trim();
     return t;
   }
 
   function luxSplitRunOns(text) {
-    let t = String(text || "");
-    t = t.replace(/\b(and|but|so)\s+(I|you|he|she|they|we)\b/g, (m, a, b) => `. ${b}`);
-    t = t.replace(/\b(I|You|He|She|They|We)\s+(I|You|He|She|They|We)\b/g, "$1. $2");
+    let t = String(text || "").trim();
+    if (!t) return t;
+
+    t = t.replace(/([a-z])\s+(I|You|He|She|They|We)\b/g, "$1. $2");
+    t = t.replace(/([a-z])\s+(But|And|So)\s+(I|you|he|she|they|we)\b/g, "$1. $2 $3");
     t = t.replace(/\.\s*\.\s*/g, ". ");
     t = t.replace(/\s{2,}/g, " ").trim();
+
     return t;
   }
 
   function luxEnsureSingleQuestion(text) {
     let t = String(text || "").trim();
     if (!t) return t;
-    const qCount = (t.match(/\?/g) || []).length;
-    if (qCount <= 1) return t;
-    let seen = 0;
-    t = t.replace(/\?/g, () => {
-      seen += 1;
-      return seen === qCount ? "?" : ".";
-    });
+
+    const matches = [...t.matchAll(/\?/g)];
+    if (matches.length <= 1) return t;
+
+    const lastIndex = matches[matches.length - 1].index;
+    t = t.split("").map((ch, i) => {
+      if (ch === "?" && i !== lastIndex) return ".";
+      return ch;
+    }).join("");
+
+    t = t.replace(/\.\./g, ".");
+    t = t.replace(/\s{2,}/g, " ").trim();
     return t;
   }
 
   function luxEnsureEnding(text) {
     let t = String(text || "").trim();
     if (!t) return t;
-    if (!/[.?]$/.test(t)) t += ".";
+    if (!/[.!?]$/.test(t)) t += ".";
     return t;
   }
 
   function postFormat(text) {
     if (!text) return text;
+
     let t = stripStampsAll(text);
     t = toAscii(t);
     t = enforceFeminineTone(t);
-    t = stripDisallowedPunct(t);
     t = purgeBannedWords(t);
     t = applyLexiconPrefs(t);
     t = fixMissingApostrophes(t);
+    t = stripDisallowedPunct(t);
     t = luxRepairPunctuation(t);
     t = luxSplitRunOns(t);
     t = luxEnsureSingleQuestion(t);
     t = luxSentenceCase(t);
     t = fixPronounI(t);
     t = normalizeSpaces(t);
-    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") t = LUXPatch.NoRepeat.scrub(t);
+
+    if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") {
+      t = LUXPatch.NoRepeat.scrub(t);
+    }
+
     t = luxEnsureQuestion(t, window.__LUX_LAST_USER);
     t = luxEnsureEnding(t);
+
     return clampToLimit(t);
   }
 
@@ -2380,8 +2398,8 @@ async function lux_ensureAccess() {
     let t = String(text || "");
     t = t.replace(/\s+/g, " ").trim();
     t = t.replace(/\.{3,}/g, ".");
-    t = t.replace(/\s*([,?.])\s*/g, "$1 ");
-    t = t.replace(/[^\w\s,?.']/g, " ");
+    t = t.replace(/\s*([,?.!])\s*/g, "$1 ");
+    t = t.replace(/[^\w\s,?.!']/g, " ");
     t = t.replace(/\s{2,}/g, " ").trim();
     return t;
   }
@@ -2768,7 +2786,18 @@ async function lux_ensureAccess() {
     const tuned = withCreativeBoost(basePreset, rawMsg);
     const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
 
-    const latestImage = luxGetLatestClientImageUrl();
+    const latestClientRow = (() => {
+      try {
+        const thread = document.querySelector(THREAD_SEL);
+        if (!thread) return null;
+        const rows = [...thread.querySelectorAll(CLIENT_MSG_SELECTOR)];
+        return rows.length ? rows[rows.length - 1] : null;
+      } catch {
+        return null;
+      }
+    })();
+
+    const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
     let userPayload = { role: "user", content: rawMsg };
 
     if (latestImage) {
