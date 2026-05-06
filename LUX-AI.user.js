@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.6
-// @description  Old LUX voice retained with Grok/DeepSeek/Claude only, stronger custom persona, two image selectors, natural questions, cleaner punctuation, and no canned openers.
+// @version      14.6.9
+// @description  Old LUX voice retained with Grok/DeepSeek/Claude only, stronger custom persona, two image selectors, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -149,8 +149,8 @@ async function lux_ensureAccess() {
   const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
   const MODEL_DEFAULT = "x-ai/grok-4-fast";
   const POLL_MS = 3000;
-  const HISTORY_MAX = 14;
-  const REQUEST_TIMEOUT_MS = 35000;
+  const HISTORY_MAX = 10;
+  const REQUEST_TIMEOUT_MS = 25000;
   const MAX_CHARS = 800;
   const LUX_DEBUG_LOGGING = true;
   const LUX_NOTE_RETRY_DELAYS = [0, 500, 1200, 2200];
@@ -185,15 +185,15 @@ async function lux_ensureAccess() {
     temperature: 0.58,
     top_p: 0.92,
     repetition_penalty: 1.02,
-    max_tokens: 240,
+    max_tokens: 200,
     stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"],
     seed: 11
   };
 
   const MODEL_PRESETS = {
-    "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 220, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
-    "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 220, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
-    "deepseek/deepseek-chat": { temperature: 1.0, top_p: 0.98, repetition_penalty: 1.02, max_tokens: 230, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
+    "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
+    "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
+    "deepseek/deepseek-chat": { temperature: 1.0, top_p: 0.98, repetition_penalty: 1.02, max_tokens: 200, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
   };
 
   const LUX_SUPPORTED_MODELS = [
@@ -210,9 +210,9 @@ async function lux_ensureAccess() {
   const LUX_THEME_MEMORY_KEY = "lux_theme_memory_v1";
   const LUX_REACTION_COOLDOWN_KEY = "lux_reaction_cooldown_v1";
   const LUX_REFUSAL_MEMORY_KEY = "lux_refusal_memory_v1";
-  const LUX_HISTORY_TOKEN_BUDGET = 1400;
+  const LUX_HISTORY_TOKEN_BUDGET = 950;
   const LUX_ENABLE_AUTO_RETRY = false;
-  const LUX_DEDUP_WINDOW_MS = 2200;
+  const LUX_DEDUP_WINDOW_MS = 3500;
 
   const LUX_CONVERSATION_THEMES = [];
 
@@ -1200,7 +1200,7 @@ async function lux_ensureAccess() {
   }
 
   function lux_recentReplyKey() { try { return `${_threadKey()}__recent_replies_v1`; } catch { return "lux_recent_replies_global_v1"; } }
-  function lux_getRecentReplies() { try { const arr = JSON.parse(GM_getValue(lux_recentReplyKey(), "[]")); return Array.isArray(arr) ? arr.slice(-10) : []; } catch { return []; } }
+  function lux_getRecentReplies() { try { const arr = JSON.parse(GM_getValue(lux_recentReplyKey(), "[]")); return Array.isArray(arr) ? arr.slice(-6) : []; } catch { return []; } }
   function lux_pushRecentReply(text) {
     try {
       const arr = lux_getRecentReplies();
@@ -1427,7 +1427,7 @@ async function lux_ensureAccess() {
       for (const x of ngrams(r, 5)) banned.add(x);
     });
     ["what's the first thing", "whats the first thing", "what's on your mind", "whats on your mind", "most spontaneous", "wildest", "craziest", "that picture of you"].forEach(x => banned.add(x));
-    return Array.from(banned).slice(0, 160);
+    return Array.from(banned).slice(0, 55);
   }
 
   function luxViolatesMeetupBoundary(text) {
@@ -1538,6 +1538,7 @@ async function lux_ensureAccess() {
       "Use concrete details over vague filler.",
       "Punctuation rule, only use comma, period, question mark, and apostrophe, no other symbols.",
       "Always respond to the latest customer message only.",
+      "Use previous chat history only as light background, do not over-explain old details unless needed.",
       "When an image is present, treat it as attached to the latest customer message only, using only img.rounded.mb-2 or div.lb-nav inside that latest customer row.",
       "Do not describe older photos, earlier uploads, or anything outside the latest customer turn.",
       "If the latest customer message is mainly text, answer that text first, then mention the image naturally only if it helps. Do not begin with a generic image opener.",
@@ -1647,6 +1648,52 @@ async function lux_ensureAccess() {
     return kept.reverse();
   }
 
+
+
+  function lux_cleanTurnForHistory(turn) {
+    if (!turn || !turn.role) return null;
+    const split = extractLuxImageMeta(turn.content || "");
+    const text = stripStampsAll(split.text || "");
+    const notes = (split.notes || "").trim();
+    const content = text || (notes ? "Customer sent a photo." : "");
+    if (!content) return null;
+    return { role: turn.role, content };
+  }
+
+  function lux_historySig(item) {
+    if (!item || !item.role) return "";
+    return `${item.role}:${normalizeForCompare(item.content || "").slice(0, 240)}`;
+  }
+
+  function lux_mergeHistoryFromTurns(turns) {
+    const merged = [];
+    const seen = new Set();
+    const add = item => {
+      if (!item || !item.role || !item.content) return;
+      const sig = lux_historySig(item);
+      if (!sig || seen.has(sig)) return;
+      seen.add(sig);
+      merged.push({ role: item.role, content: stripStampsAll(item.content || "") });
+    };
+    for (const item of shortHistory || []) add(lux_cleanHistoryMessage(item));
+    for (const turn of turns || []) add(lux_cleanTurnForHistory(turn));
+    return merged.slice(-HISTORY_MAX);
+  }
+
+  function lux_historyWithoutCurrentUser(history, rawMsg) {
+    const current = normalizeForCompare(stripStampsAll(rawMsg || ""));
+    if (!current) return history || [];
+    const out = [...(history || [])];
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i] && out[i].role === "user") {
+        const old = normalizeForCompare(stripStampsAll(out[i].content || ""));
+        if (old && (old === current || overlapScore(old, current) > 0.88)) out.splice(i, 1);
+        break;
+      }
+    }
+    return out;
+  }
+
   const LUXPatch = (typeof window.LUXPatch !== "undefined" ? window.LUXPatch : (window.LUXPatch = {}));
 
   LUXPatch.NoRepeat = (() => {
@@ -1749,7 +1796,7 @@ async function lux_ensureAccess() {
       let out = "";
       try {
         out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
-          max_tokens: 155,
+          max_tokens: 125,
           temperature: 0.64,
           top_p: 0.92,
           frequency_penalty: 0.18,
@@ -2393,7 +2440,7 @@ async function lux_ensureAccess() {
         const user = `Customer message: "${rawMsg.slice(0, 260)}"\nAbout text: "${profileText.slice(0, 900)}"\nWrite one natural response about the profile.`;
         try {
           out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], {
-            max_tokens: 180,
+            max_tokens: 145,
             temperature: 0.52,
             top_p: 0.90
           });
@@ -2461,7 +2508,7 @@ async function lux_ensureAccess() {
         qGuide
       ].join(" ");
       const user = `They asked about your job.\nCustomer: "${rawMsg.slice(0, 240)}"\nReply in one short paragraph and end with exactly one open ended question if it feels natural.`;
-      let out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], { max_tokens: 140, temperature: 0.45, top_p: 0.90 });
+      let out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], { max_tokens: 115, temperature: 0.45, top_p: 0.90 });
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       if (luxNeedsHardMeetupRepair(rawMsg, out)) out = await Safety.modelRefusal("meet", leftCard, rawMsg);
       out = postFormat(out).replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
@@ -2501,7 +2548,7 @@ async function lux_ensureAccess() {
     const chosenModel = lux_normalizeModelName(GM_getValue("lux_model", MODEL_DEFAULT));
     const basePreset = getModelPreset(chosenModel);
     const tuned = withCreativeBoost(basePreset, rawMsg);
-    const historyForModel = lux_buildHistoryByTokens(shortHistory, LUX_HISTORY_TOKEN_BUDGET);
+    const historyForModel = lux_buildHistoryByTokens(lux_historyWithoutCurrentUser(shortHistory, rawMsg), LUX_HISTORY_TOKEN_BUDGET);
 
     const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
     let userPayload = { role: "user", content: rawMsg };
@@ -2743,22 +2790,21 @@ async function lux_ensureAccess() {
       if (content) turns.push({ role: fromClient ? "user" : "assistant", content: stripStampsKeepMeta(content) });
     }
 
-    const lastUser = turns.slice().reverse().find(t => t.role === "user");
-    if (!lastUser) return;
+    // Only the newest visible customer row is allowed to trigger LUX.
+    // Older customer messages stay as background memory, but LUX must not answer them.
+    const latestTurn = turns.length ? turns[turns.length - 1] : null;
+    if (!latestTurn || latestTurn.role !== "user") return;
 
-    const split = extractLuxImageMeta(lastUser.content || "");
+    const split = extractLuxImageMeta(latestTurn.content || "");
     const cleanForUI = stripStampsAll(split.text || "");
     const imageOnly = !cleanForUI && !!(split.notes || "").trim();
     const uiText = cleanForUI || (imageOnly ? "Customer sent a photo." : "");
-    const seenSig = `${cleanForUI}|${(split.notes || "").trim()}`;
+    const seenSig = `latest_user:${cleanForUI}|${(split.notes || "").trim()}`;
     if (!uiText || seenSig === lastSeen) return;
     lastSeen = seenSig;
 
     if (turns.length) {
-      shortHistory = turns.slice(-HISTORY_MAX).map(t => ({
-        role: t.role,
-        content: stripStampsAll(extractLuxImageMeta(t.content || "").text || "")
-      }));
+      shortHistory = lux_mergeHistoryFromTurns(turns);
       _saveHistory();
     }
 
@@ -2773,7 +2819,7 @@ async function lux_ensureAccess() {
       }, delay);
     }
 
-    callBackend(lastUser.content);
+    callBackend(latestTurn.content);
   }
 
   function setupThreadWatcher() {
