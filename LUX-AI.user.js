@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.31
-// @description  Old LUX voice restored with old-style regeneration, lively salutations, no canned pools, trimmed model set, latest-image focus, and custom persona support.
+// @version      14.6.6
+// @description  Old LUX voice retained with Grok/DeepSeek/Claude only, stronger custom persona, two image selectors, natural questions, cleaner punctuation, and no canned openers.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -173,7 +173,11 @@ async function lux_ensureAccess() {
   const ABOUT_USER_SELECTOR = "p#about-user";
   const LUX_NOTE_LAST_HASH_KEY = "lux_member_note_last_hash_v1";
 
-  const CLIENT_IMAGE_SELECTOR = "img.rounded.mb-2";
+  const CLIENT_IMAGE_SELECTORS = [
+    "img.rounded.mb-2",
+    "div.lb-nav"
+  ];
+  const CLIENT_IMAGE_SELECTOR = CLIENT_IMAGE_SELECTORS.join(",");
   const LUX_IMG_START = "LUX_IMG_NOTES_START";
   const LUX_IMG_END = "LUX_IMG_NOTES_END";
 
@@ -412,14 +416,90 @@ async function lux_ensureAccess() {
       /\btake\s+a\s+look\s+at\s+my\s+profile\b/i.test(text || "");
   }
 
+  function luxElementTextBits(el) {
+    try {
+      if (!el) return "";
+      return [
+        el.getAttribute && el.getAttribute("alt"),
+        el.getAttribute && el.getAttribute("title"),
+        el.getAttribute && el.getAttribute("aria-label"),
+        el.getAttribute && el.getAttribute("data-caption"),
+        el.getAttribute && el.getAttribute("data-title"),
+        el.className,
+        el.id
+      ].map(x => String(x || "")).join(" ").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+
+  function luxExtractUrlFromImageLike(el) {
+    try {
+      if (!el) return "";
+      const img = el.tagName && el.tagName.toLowerCase() === "img" ? el : el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img");
+      if (img) {
+        const src = (img.currentSrc || img.src || img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-original") || "").trim();
+        if (src) return src;
+        const a = img.closest && img.closest("a[href]");
+        if (a && a.href) return a.href.trim();
+      }
+      const a = el.closest && el.closest("a[href]");
+      if (a && a.href) return a.href.trim();
+      const innerA = el.querySelector && el.querySelector("a[href]");
+      if (innerA && innerA.href) return innerA.href.trim();
+      const style = (el.getAttribute && el.getAttribute("style")) || "";
+      const bg = style.match(/url\(["']?([^"')]+)["']?\)/i);
+      if (bg && bg[1]) return bg[1].trim();
+      const cssBg = window.getComputedStyle ? (getComputedStyle(el).backgroundImage || "") : "";
+      const bg2 = cssBg.match(/url\(["']?([^"')]+)["']?\)/i);
+      if (bg2 && bg2[1]) return bg2[1].trim();
+      return "";
+    } catch {
+      return "";
+    }
+  }
+
+  function luxIsLikelyCustomerAttachment(el) {
+    try {
+      if (!el) return false;
+      const url = luxExtractUrlFromImageLike(el);
+      const bits = `${url} ${luxElementTextBits(el)}`.toLowerCase();
+      if (!url && !/lb-nav|rounded|image|photo|picture/.test(bits)) return false;
+      if (/avatar|profile-avatar|flag|emoji|icon|badge|logo|navbar|sprite|blank|placeholder/.test(bits)) return false;
+      const target = el.tagName && el.tagName.toLowerCase() === "img" ? el : (el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img")) || el;
+      const r = target.getBoundingClientRect ? target.getBoundingClientRect() : { width: target.width || 0, height: target.height || 0 };
+      const w = target.naturalWidth || target.width || r.width || 0;
+      const h = target.naturalHeight || target.height || r.height || 0;
+      if (w && h && (w < 35 || h < 35)) return false;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function luxFindCustomerImageElements(node) {
+    if (!node) return [];
+    const found = [];
+    const seen = new Set();
+    try {
+      const direct = [...node.querySelectorAll(CLIENT_IMAGE_SELECTOR)];
+      for (const el of direct) {
+        const actual = (el.tagName && el.tagName.toLowerCase() === "img") ? el : ((el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img")) || el);
+        const url = luxExtractUrlFromImageLike(actual || el);
+        const key = `${url}|${actual?.outerHTML?.slice(0, 120) || el.outerHTML?.slice(0, 120) || ""}`;
+        if (seen.has(key)) continue;
+        if (!luxIsLikelyCustomerAttachment(actual || el)) continue;
+        seen.add(key);
+        found.push(actual || el);
+      }
+    } catch {}
+    return found;
+  }
+
   function luxGetLatestClientImageUrlFromMessage(messageNode) {
     try {
-      if (!messageNode) return "";
-      const img = messageNode.querySelector(CLIENT_IMAGE_SELECTOR);
-      if (!img) return "";
-      const parentLink = img.closest("a");
-      if (parentLink && parentLink.href) return parentLink.href.trim();
-      return (img.currentSrc || img.src || "").trim();
+      const img = luxFindCustomerImageElements(messageNode)[0];
+      return luxExtractUrlFromImageLike(img);
     } catch {
       return "";
     }
@@ -427,32 +507,21 @@ async function lux_ensureAccess() {
 
   function getImageNotes(node) {
     if (!node) return [];
-    const imgs = [...node.querySelectorAll(CLIENT_IMAGE_SELECTOR)].filter(img => {
-      try {
-        const src = String(img.currentSrc || img.getAttribute("src") || "").toLowerCase();
-        const alt = String(img.getAttribute("alt") || "").toLowerCase();
-        const cls = String(img.className || "").toLowerCase();
-        if (!src && !alt) return false;
-        if (/avatar|profile-avatar|flag|emoji|icon|badge|logo/.test(src + " " + alt + " " + cls)) return false;
-        const r = img.getBoundingClientRect ? img.getBoundingClientRect() : { width: img.width || 0, height: img.height || 0 };
-        const w = img.naturalWidth || img.width || r.width || 0;
-        const h = img.naturalHeight || img.height || r.height || 0;
-        return w >= 40 && h >= 40;
-      } catch { return false; }
-    });
+    const imgs = luxFindCustomerImageElements(node);
     const notes = [];
     imgs.forEach(img => {
-      const alt = (img.getAttribute("alt") || "").trim();
-      const src = (img.currentSrc || img.getAttribute("src") || "").trim();
-      const w = img.naturalWidth || img.width || 0;
-      const h = img.naturalHeight || img.height || 0;
+      const alt = (img.getAttribute && (img.getAttribute("alt") || img.getAttribute("title") || img.getAttribute("aria-label"))) || "";
+      const src = luxExtractUrlFromImageLike(img);
+      const r = img.getBoundingClientRect ? img.getBoundingClientRect() : { width: img.width || 0, height: img.height || 0 };
+      const w = Math.round(img.naturalWidth || img.width || r.width || 0);
+      const h = Math.round(img.naturalHeight || img.height || r.height || 0);
       let name = "";
       if (src) {
         const clean = src.split("?")[0];
         name = clean.split("/").pop() || "";
       }
       const parts = [];
-      if (alt) parts.push(`alt text ${alt}`);
+      if (alt) parts.push(`alt text ${String(alt).trim()}`);
       if (name) parts.push(`file ${name}`);
       if (w && h) parts.push(`size ${w}x${h}`);
       notes.push(parts.length ? parts.join(", ") : "customer attached an image to this latest message");
@@ -738,28 +807,21 @@ async function lux_ensureAccess() {
   }
 
   function luxImageOpeners(seed) {
-    const options = [
-      "That photo caught my attention.",
-      "Interesting picture you shared.",
-      "I noticed the image you sent.",
-      "That picture has a nice vibe to it.",
-      "I like the atmosphere in that photo."
-    ];
-    return options[Math.abs(hashStr(seed)) % options.length];
+    return "";
   }
 
   function luxInferImageIntent(messageNode, messageText) {
     const text = String(messageText || "").toLowerCase();
-    const img = messageNode ? messageNode.querySelector(CLIENT_IMAGE_SELECTOR) : null;
-    const src = String((img?.currentSrc || img?.src || "")).toLowerCase();
-    const alt = String((img?.getAttribute("alt") || "")).toLowerCase();
+    const img = luxFindCustomerImageElements(messageNode)[0] || null;
+    const src = String(luxExtractUrlFromImageLike(img) || "").toLowerCase();
+    const alt = String((img && img.getAttribute && (img.getAttribute("alt") || img.getAttribute("title") || img.getAttribute("aria-label"))) || "").toLowerCase();
     const blob = `${text} ${src} ${alt}`;
     if (/\b(that'?s me|this is me|my photo|my pic|my picture|my selfie|selfie of me|here is me|here'?s me)\b/i.test(text)) return "selfie";
     if (/\b(screenshot|screen shot|profile pic|profile picture|chat screenshot|look at her|look at this girl|her photo|this woman|this lady|this girl)\b/i.test(blob)) return "screenshot";
     if (/\b(meme|funny pic|joke|reaction image|sticker)\b/i.test(blob)) return "meme";
     if (/\b(food|meal|breakfast|lunch|dinner|snack|plate|restaurant|dish|drink)\b/i.test(blob)) return "food";
     if (/\b(beach|vacation|holiday|travel|trip|mountain|hotel|city|view|sunset|pool|airport)\b/i.test(blob)) return "place";
-    return "unknown";
+    return img ? "attached-image" : "unknown";
   }
 
   function parseClientFactsFromLatestMessage(messageText) {
@@ -1202,7 +1264,7 @@ async function lux_ensureAccess() {
   function luxQuestionGuide(tone, engagement, userText) {
     const boundary = Safety.wantsMeet(userText) || Safety.wantsMeetSoft(userText) || Safety.wantsContact(userText) || Safety.mentionsAddress(userText);
     const base = [
-      "If a question fits, create exactly one fresh open ended question from the customer message itself.",
+      "If a question fits, create exactly one fresh open ended question from the customer message itself, not from a stock pattern.",
       "Do not use stored questions, fallback questions, prompt-like questions, interview questions, or repeated question shapes.",
       "Do not ask how was your day, what are you up to, tell me about yourself, what kind of, what made you, if you could, what would it look like, perfect day, first thing, craziest, wildest, or most spontaneous.",
       "If the natural reply does not need a question, end without one.",
@@ -1425,6 +1487,11 @@ async function lux_ensureAccess() {
       /\blow key for now\b/gi,
       /\blet(?:'|’)s build this up first\b/gi,
       /\bwhat kind of day have you had(?: today)?\??\s*/gi,
+      /\bthat photo caught my attention\.?\s*/gi,
+      /\binteresting picture you shared\.?\s*/gi,
+      /\bi noticed the image you sent\.?\s*/gi,
+      /\bthat picture has a nice vibe to it\.?\s*/gi,
+      /\bi like the atmosphere in that photo\.?\s*/gi,
       /\bhow was your day\??\s*/gi,
       /\bwhat are you up to\??\s*/gi,
       /\btell me about yourself\.?\s*/gi
@@ -1432,6 +1499,13 @@ async function lux_ensureAccess() {
     bad.forEach(rx => { t = t.replace(rx, ""); });
     return t.replace(/\s{2,}/g, " ").replace(/^[,.;:\-\s]+/, "").trim();
   }
+
+  function luxCustomPersonaLayer() {
+    const persona = (GM_getValue("lux_persona", "") || "").trim();
+    if (!persona) return "";
+    return `Custom persona is active. Treat this as the main character voice, backstory, personality, habits, job, rhythm, emotional style, and relationship energy for LUX. Follow it strongly in every reply path, including greetings, images, profile checks, refusals, location or job answers, and regeneration, unless it conflicts with platform boundaries, ${persona}.`;
+  }
+
   function buildSystemPrompt(leftCard, customSystem, imageNotes, imageIntent = "unknown") {
     const card = personaCardLine(leftCard) || "";
     const modelName = lux_normalizeModelName(GM_getValue("lux_model", MODEL_DEFAULT)).toLowerCase();
@@ -1464,9 +1538,9 @@ async function lux_ensureAccess() {
       "Use concrete details over vague filler.",
       "Punctuation rule, only use comma, period, question mark, and apostrophe, no other symbols.",
       "Always respond to the latest customer message only.",
-      "When an image is present, treat it as attached to the latest customer message only.",
+      "When an image is present, treat it as attached to the latest customer message only, using only img.rounded.mb-2 or div.lb-nav inside that latest customer row.",
       "Do not describe older photos, earlier uploads, or anything outside the latest customer turn.",
-      "If the latest customer message is mainly text, answer that text first, then mention the image naturally only if it helps.",
+      "If the latest customer message is mainly text, answer that text first, then mention the image naturally only if it helps. Do not begin with a generic image opener.",
       "Never assume the person in the photo is the customer.",
       "The customer may share screenshots, memes, or pictures of other people.",
       "If the person in the image could be someone else, speak about the photo in a neutral observational way.",
@@ -1502,7 +1576,7 @@ async function lux_ensureAccess() {
     else if (modelName.startsWith("anthropic/claude-3.5-sonnet")) flavor = "Lean into a softer, emotionally aware, romantic tone. Use gentle language but keep it grounded.";
     else if (modelName.includes("deepseek/deepseek-chat")) flavor = "Be natural and conversational, strong at roleplay, with smooth scene flow, vivid emotion, and grounded dialogue. Avoid sounding instructional or formal.";
 
-    const customBlock = customSystem && customSystem.trim() ? ` Custom persona layer, follow this character voice and backstory unless it conflicts with platform boundaries, ${customSystem.trim()}.` : "";
+    const customBlock = customSystem && customSystem.trim() ? ` Custom persona is active. Treat this as the main character voice, backstory, personality, habits, job, rhythm, emotional style, and relationship energy for LUX. Follow it strongly unless it conflicts with platform boundaries, ${customSystem.trim()}.` : "";
     return `${baseCore}${photoContext} ${imageRules} ${flavor}${customBlock}${bridgeBlock} ${salutationBlock}${card}`;
   }
 
@@ -1651,6 +1725,7 @@ async function lux_ensureAccess() {
 
       const sys = [
         "You are an adult woman on a dating site.",
+        luxCustomPersonaLayer(),
         getAccentInstructionByCountry(profileCard?.country || ""),
         "Answer like a real woman texting in the moment, warm, calm, human, and not dismissive.",
         "Do not agree to meet, do not give contact details, do not give exact address, and do not move off platform.",
@@ -1697,6 +1772,7 @@ async function lux_ensureAccess() {
         : "They brought up racism or race based degradation.";
       const sys = [
         "You are an adult woman on a dating site.",
+        luxCustomPersonaLayer(),
         getAccentInstructionByCountry(profileCard?.country || ""),
         "Refuse calmly and briefly.",
         "Do not engage with the topic.",
@@ -2300,6 +2376,7 @@ async function lux_ensureAccess() {
         const qGuide = luxQuestionGuide(toneInfo.tone, toneInfo.engagement, rawMsg);
         const sys = [
           "You are an adult woman on a dating site.",
+          luxCustomPersonaLayer(),
           getAccentInstructionByCountry(leftCard?.country || ""),
           "The customer asked you to check or read their profile.",
           "Use the about text to infer their vibe, intention, tone, and what kind of person they may be.",
@@ -2321,7 +2398,7 @@ async function lux_ensureAccess() {
             top_p: 0.90
           });
         } catch {}
-        if (!out) out = "I had a look, and your profile gives me a thoughtful vibe. It feels like there is more depth to you than you wrote there, what do you think it leaves out the most?";
+        if (!out) out = "There is a thoughtful feeling in what you wrote, like there is more to you than the short lines show. What part of yourself do you think people usually miss at first?";
       }
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       if (luxNeedsHardMeetupRepair(rawMsg, out)) out = await Safety.modelRefusal("meet", leftCard, rawMsg);
@@ -2336,7 +2413,7 @@ async function lux_ensureAccess() {
 
     if (Safety.askName(rawMsg)) {
       const profName = (leftCard && leftCard.realName) ? leftCard.realName : "Luna";
-      const sys = "Natural English in the profile country style. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
+      const sys = luxCustomPersonaLayer() + " Natural English in the profile country style. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
       const user = `They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
       let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], { max_tokens: 100, temperature: 0.30, top_p: 0.88 });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
@@ -2352,7 +2429,7 @@ async function lux_ensureAccess() {
 
     if (Safety.wantsLocation(rawMsg)) {
       const profCity = (leftCard && leftCard.location) ? leftCard.location : "nearby";
-      const sys = "If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
+      const sys = luxCustomPersonaLayer() + " If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
       const user = `City only: "${profCity}". ${personaCardLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
       let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], { max_tokens: 100, temperature: 0.30, top_p: 0.88 });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
@@ -2373,6 +2450,7 @@ async function lux_ensureAccess() {
       const qGuide = luxQuestionGuide(toneInfo.tone, toneInfo.engagement, rawMsg);
       const sys = [
         "You are an adult woman on a dating site. Natural, warm, human, not formal.",
+        luxCustomPersonaLayer(),
         getAccentInstructionByCountry(leftCard?.country || ""),
         "Only use comma, period, question mark, and apostrophe.",
         "Do not mention policy, do not mention rules.",
