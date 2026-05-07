@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.9
-// @description  Old LUX voice retained with Grok/DeepSeek/Claude only, stronger custom persona, two image selectors, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory.
+// @version      14.6.12
+// @description  Old LUX voice retained with Grok/DeepSeek/Claude only, stronger custom persona, two image selectors, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory and profile-picture-comment detection.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -370,20 +370,129 @@ async function lux_ensureAccess() {
     return "Write in natural, warm, feminine English.";
   }
 
+  function luxCleanPersonaJobLine(value) {
+    let t = normalizeLooseText(value || "");
+    if (!t) return "";
+    t = t.replace(/^(?:i\s+)?(?:am|m|work|works|working)\s+(?:as\s+|in\s+|with\s+)?/i, "");
+    t = t.replace(/^(?:a|an)\s+/i, "");
+    t = t.split(/\b(?:and|but|because|while|so)\b/i)[0].trim();
+    t = t.replace(/[^A-Za-z0-9\s,&'\-]/g, "").trim();
+    if (!t || t.length < 3 || t.length > 80) return "";
+    if (/\b(?:adult|woman|female|trans|feminine|dominant|soft|sweet|naughty|romantic|personality|persona|voice|tone|backstory|identity)\b/i.test(t)) return "";
+    return t;
+  }
+
+  function luxExtractCustomPersonaJob() {
+    try {
+      const persona = String(GM_getValue("lux_persona", "") || "").trim();
+      if (!persona) return "";
+      const patterns = [
+        /(?:^|[\n\.])\s*(?:job|work|occupation|career|profession)\s*[:=\-]\s*([^\n\.]{3,90})/i,
+        /(?:^|[\n\.])\s*(?:she|i)\s+(?:work|works|working)\s+as\s+(?:a\s+|an\s+)?([^\n\.]{3,90})/i,
+        /(?:^|[\n\.])\s*(?:she|i)\s+(?:work|works|working)\s+in\s+([^\n\.]{3,90})/i,
+        /(?:^|[\n\.])\s*(?:she|i)\s+(?:run|runs|own|owns)\s+(?:a\s+|an\s+)?([^\n\.]{3,90})/i
+      ];
+      for (const rx of patterns) {
+        const m = persona.match(rx);
+        if (m && m[1]) {
+          const job = luxCleanPersonaJobLine(m[1]);
+          if (job) return job;
+        }
+      }
+    } catch {}
+    return "";
+  }
+
   function jobOptionsForAge(age) {
-    if (!age) return ["I work in customer support and admin", "I do office admin and scheduling", "I work in hospitality and service"];
-    if (age >= 18 && age <= 22) return ["I'm a student and I do part time retail work", "I'm studying and I do customer support part time", "I'm a junior admin assistant and I study on the side"];
-    if (age >= 23 && age <= 29) return ["I work in customer support and operations", "I'm in marketing and social media", "I do admin and project coordination"];
-    if (age >= 30 && age <= 39) return ["I work in operations and team coordination", "I'm in HR and office management", "I do client services and account support"];
-    if (age >= 40 && age <= 49) return ["I work in office management and operations", "I'm in customer relations and admin leadership", "I do business support and coordination"];
-    if (age >= 50 && age <= 59) return ["I work in administration and supervision", "I'm in client relations and team support", "I do office coordination and scheduling"];
-    if (age >= 60) return ["I'm semi retired and I do light consulting work", "I'm semi retired and I help with community projects", "I'm semi retired and I do part time admin support"];
-    return ["I work in admin and coordination", "I do customer support and operations"];
+    const a = Number(age) || 0;
+    const early20s = [
+      "I study part time and work as a barista",
+      "I work at a boutique and help with styling customers",
+      "I'm training in beauty therapy and work at a salon",
+      "I work at a hotel front desk while taking online classes",
+      "I'm a junior social media assistant",
+      "I work at a fitness studio reception",
+      "I'm learning makeup artistry and work part time in retail",
+      "I help at a small bakery and do customer service",
+      "I'm studying early childhood care and work part time",
+      "I work as an apprentice florist"
+    ];
+    const mid20s = [
+      "I work as a spa therapist",
+      "I'm a marketing assistant for a small company",
+      "I work as a travel consultant",
+      "I'm a dental receptionist",
+      "I work in fashion retail management",
+      "I'm an events assistant",
+      "I work as a real estate office assistant",
+      "I'm a junior bookkeeper",
+      "I work in beauty sales and client care",
+      "I'm a teaching assistant"
+    ];
+    const thirties = [
+      "I work as an events coordinator",
+      "I'm a property manager",
+      "I work in HR coordination",
+      "I'm a boutique manager",
+      "I work as an aesthetician",
+      "I'm a client relationship coordinator",
+      "I work in interior styling and home staging",
+      "I'm a training coordinator",
+      "I do bookkeeping for a small business",
+      "I work as a travel planner"
+    ];
+    const forties = [
+      "I run a small beauty studio",
+      "I work as a senior stylist at a salon",
+      "I'm a real estate agent",
+      "I work as an accounts officer",
+      "I'm a wellness coach",
+      "I manage a small boutique",
+      "I work as a school administrator",
+      "I'm a catering coordinator",
+      "I work in property rentals",
+      "I'm a customer experience manager"
+    ];
+    const fifties = [
+      "I work as a bookkeeper",
+      "I'm a salon manager",
+      "I work as a care coordinator",
+      "I'm a travel agent",
+      "I run a small online shop",
+      "I work as a school secretary",
+      "I'm an interior staging consultant",
+      "I work in community program coordination",
+      "I'm a guesthouse manager",
+      "I do freelance client support from home"
+    ];
+    const sixties = [
+      "I'm semi retired and do part time bookkeeping",
+      "I'm semi retired and help manage a small guesthouse",
+      "I do part time tutoring after years in education",
+      "I help run a small craft and gift business",
+      "I'm semi retired and work a few days at a local boutique",
+      "I do light consulting for small businesses",
+      "I work part time as a receptionist",
+      "I help with community projects and small admin work",
+      "I do part time floral work because I enjoy it",
+      "I'm semi retired and still do a little client care work"
+    ];
+    if (!a) return [...mid20s, ...thirties, ...forties];
+    if (a >= 18 && a <= 22) return early20s;
+    if (a >= 23 && a <= 29) return mid20s;
+    if (a >= 30 && a <= 39) return thirties;
+    if (a >= 40 && a <= 49) return forties;
+    if (a >= 50 && a <= 59) return fifties;
+    if (a >= 60) return sixties;
+    return [...mid20s, ...thirties, ...forties];
   }
 
   function suggestJobLine(leftCard, age) {
+    const personaJob = luxExtractCustomPersonaJob();
+    if (personaJob) return `I work as ${/^(?:a|an)\b/i.test(personaJob) ? personaJob : "a " + personaJob}`;
     const base = jobOptionsForAge(age);
-    const seed = (leftCard?.realName || leftCard?.displayName || "") + ":" + String(age || "");
+    const mode = (typeof lux_getPersonaMode === "function") ? lux_getPersonaMode() : "";
+    const seed = [leftCard?.realName || "", leftCard?.displayName || "", leftCard?.age || age || "", leftCard?.location || "", leftCard?.country || "", mode].join(":");
     return pickByHash(base, seed) || base[0];
   }
 
@@ -479,6 +588,7 @@ async function lux_ensureAccess() {
 
   function luxFindCustomerImageElements(node) {
     if (!node) return [];
+    if (luxIsProfilePictureCommentRow(node)) return [];
     const found = [];
     const seen = new Set();
     try {
@@ -496,6 +606,51 @@ async function lux_ensureAccess() {
     return found;
   }
 
+
+  function luxRowTextBlob(node, extraText = "") {
+    try {
+      const attrs = [];
+      if (node && node.getAttribute) {
+        ["aria-label", "title", "data-title", "data-type", "data-action"].forEach(k => {
+          const v = node.getAttribute(k);
+          if (v) attrs.push(v);
+        });
+      }
+      const inner = node ? (node.innerText || node.textContent || "") : "";
+      const imgBits = node ? [...node.querySelectorAll("img, a, div")].slice(0, 18).map(el => {
+        try {
+          return [
+            el.getAttribute("alt"),
+            el.getAttribute("title"),
+            el.getAttribute("aria-label"),
+            el.getAttribute("data-title"),
+            el.getAttribute("href"),
+            el.className
+          ].filter(Boolean).join(" ");
+        } catch { return ""; }
+      }).join(" ") : "";
+      return `${extraText || ""} ${inner} ${attrs.join(" ")} ${imgBits}`.replace(/\s+/g, " ").trim();
+    } catch {
+      return String(extraText || "");
+    }
+  }
+
+  function luxIsProfilePictureCommentRow(node, text = "") {
+    const blob = luxRowTextBlob(node, text).toLowerCase();
+    if (!blob) return false;
+    if (/\bmy\s+(?:profile\s+)?(?:photo|picture|pic|image)\b/.test(blob)) return false;
+    if (/\b(?:comment(?:ed)?|reply|replied|react(?:ed)?|like(?:d)?)\b.{0,90}\b(?:your|profile)\b.{0,90}\b(?:profile\s+)?(?:photo|picture|pic|image)\b/.test(blob)) return true;
+    if (/\b(?:your\s+profile\s+(?:photo|picture|pic|image)|profile\s+(?:photo|picture|pic|image)\s+(?:comment|reply)|comment(?:ed)?\s+on\s+(?:your\s+)?profile\s+(?:photo|picture|pic|image)|react(?:ed)?\s+to\s+(?:your\s+)?profile\s+(?:photo|picture|pic|image)|liked\s+(?:your\s+)?profile\s+(?:photo|picture|pic|image))\b/.test(blob)) return true;
+    return false;
+  }
+
+  function luxStripProfilePictureCommentUiText(text) {
+    let t = String(text || "");
+    t = t.replace(/\b(?:comment(?:ed)?|reply|replied|react(?:ed)?|like(?:d)?)\s+(?:on|to)?\s*(?:your\s+)?profile\s+(?:photo|picture|pic|image)\b/gi, "");
+    t = t.replace(/\b(?:your\s+)?profile\s+(?:photo|picture|pic|image)\s+(?:comment|reply|reaction)\b/gi, "");
+    t = t.replace(/\b(?:comment(?:ed)?|react(?:ed)?|liked)\s+(?:your\s+)?(?:photo|picture|pic|image)\b/gi, "");
+    return t.replace(/\s{2,}/g, " ").replace(/^[,.;:\-\s]+|[,.;:\-\s]+$/g, "").trim();
+  }
   function luxGetLatestClientImageUrlFromMessage(messageNode) {
     try {
       const img = luxFindCustomerImageElements(messageNode)[0];
@@ -608,8 +763,10 @@ async function lux_ensureAccess() {
 
   function extractMessageContent(node) {
     const rawText = (node?.innerText || "").trim();
-    const text = stripStampsAll(stripInlineImageNotes(rawText));
-    const imageNotes = getImageNotes(node);
+    const profilePicComment = luxIsProfilePictureCommentRow(node, rawText);
+    const cleanedRawText = profilePicComment ? luxStripProfilePictureCommentUiText(rawText) : rawText;
+    const text = stripStampsAll(stripInlineImageNotes(cleanedRawText));
+    const imageNotes = profilePicComment ? [] : getImageNotes(node);
     if (!imageNotes.length) return text;
     const meta = `${LUX_IMG_START} ${imageNotes.join(" | ")} ${LUX_IMG_END}`;
     return text ? `${text}\n${meta}` : meta;
@@ -811,6 +968,7 @@ async function lux_ensureAccess() {
   }
 
   function luxInferImageIntent(messageNode, messageText) {
+    if (luxIsProfilePictureCommentRow(messageNode, messageText)) return "profile-picture-comment";
     const text = String(messageText || "").toLowerCase();
     const img = luxFindCustomerImageElements(messageNode)[0] || null;
     const src = String(luxExtractUrlFromImageLike(img) || "").toLowerCase();
@@ -969,6 +1127,107 @@ async function lux_ensureAccess() {
     const fields = Object.entries(facts).filter(([, v]) => normalizeLooseText(v));
     if (!fields.length) return null;
     return Object.fromEntries(fields);
+  }
+
+
+
+  function luxEscapeRegExp(s) {
+    return String(s || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function luxCustomerMemoryKey() {
+    try { return `${_threadKey()}__customer_facts_v3`; }
+    catch { return "lux_customer_facts_global_v3"; }
+  }
+
+  function luxLoadCustomerMemory() {
+    try {
+      const raw = GM_getValue(luxCustomerMemoryKey(), "{}");
+      const obj = JSON.parse(raw || "{}");
+      return obj && typeof obj === "object" ? obj : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function luxSaveCustomerMemory(obj) {
+    try { GM_setValue(luxCustomerMemoryKey(), JSON.stringify(obj || {})); }
+    catch {}
+  }
+
+  function luxLooksLikeRealCustomerName(name) {
+    const s = normalizeLooseText(name);
+    if (!s) return false;
+    if (!/^[A-Za-z][A-Za-z'\-]{1,30}(?:\s+[A-Za-z][A-Za-z'\-]{1,30})?$/.test(s)) return false;
+    if (/^(Single|Married|Divorced|Widowed|Separated|Here|Ready|Busy|Fine|Okay|Ok|Tired|Captain|Baby|Babe|Dear|Darling|Love|Honey|Sweetheart|Sexy|Beautiful|Gorgeous)$/i.test(s)) return false;
+    return true;
+  }
+
+  function luxExtractCustomerNameRobust(messageText) {
+    const text = normalizeLooseText(stripStampsAll(messageText || ""));
+    if (!text) return "";
+    const patterns = [
+      /\bmy\s+name\s+(?:is|'s|was)\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
+      /\bname(?:\s+is|'s)?\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
+      /\bi\s+(?:am|'m)\s+called\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
+      /\b(?:they|people|friends)\s+call\s+me\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
+      /\b(?:call\s+me|you\s+can\s+call\s+me)\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
+      /\b(?:this\s+is|it\s+is|it's|its)\s+([A-Z][a-z'\-]{1,30}(?:\s+[A-Z][a-z'\-]{1,30})?)\b/i,
+      /^\s*([A-Z][a-z'\-]{1,30})\s+here\b/,
+      /\bI\s+am\s+([A-Z][a-z'\-]{1,30})\s*,/,
+      /\bI'm\s+([A-Z][a-z'\-]{1,30})\s*,/
+    ];
+    for (const re of patterns) {
+      const m = text.match(re);
+      if (m && m[1]) {
+        const n = luxCleanNameValue(m[1]);
+        if (luxLooksLikeRealCustomerName(n)) return n;
+      }
+    }
+    return "";
+  }
+
+  function luxUpdateCustomerMemoryFromText(messageText) {
+    const facts = parseClientFactsFromLatestMessage(messageText) || {};
+    const strongerName = luxExtractCustomerNameRobust(messageText);
+    if (strongerName) facts.Name = strongerName;
+    if (!Object.keys(facts).length) return luxLoadCustomerMemory();
+    const existing = luxLoadCustomerMemory();
+    const { merged } = mergeMemberFacts(existing, facts);
+    if (facts.Name && luxLooksLikeRealCustomerName(facts.Name)) merged.Name = facts.Name;
+    merged.__updatedAt = Date.now();
+    luxSaveCustomerMemory(merged);
+    return merged;
+  }
+
+  function luxCustomerContextLine(leftCard) {
+    const mem = luxLoadCustomerMemory();
+    const order = ["Name", "Age", "Status", "Location", "Job", "Workplace", "Experience", "Hobbies", "Activity", "Schedule", "Plans", "Preferences"];
+    const parts = [];
+    for (const key of order) {
+      const value = normalizeLooseText(mem && mem[key]);
+      if (value) parts.push(`${key}: ${value}`);
+    }
+    const wrongNames = [];
+    if (leftCard && leftCard.realName) wrongNames.push(leftCard.realName);
+    if (leftCard && leftCard.displayName) wrongNames.push(leftCard.displayName);
+    const wrongBlock = wrongNames.length ? ` LUX profile names are ${dedupeCsvItems(wrongNames).join(", ")}. Never use those names for the customer.` : "";
+    if (!parts.length) return `No confirmed customer name yet.${wrongBlock} Do not invent a customer name. Do not address the customer by LUX's own profile name.`;
+    return `Customer memory, ${parts.join(", ")}. Use this only as quiet background. Reply to the latest customer message first. If you address the customer by name, use only the customer Name from this memory. Do not invent a customer name.${wrongBlock}`;
+  }
+
+  function luxFixWrongCustomerName(text, customerMsg, leftCard) {
+    let t = String(text || "");
+    const mem = luxLoadCustomerMemory();
+    const customerName = normalizeLooseText(mem && mem.Name);
+    if (!customerName || !luxLooksLikeRealCustomerName(customerName)) return t;
+    if (/\b(what(?:'| i)?s\s+your\s+name|ur\s*name|name\s*please|name\s*pls|who\s+are\s+you)\b/i.test(customerMsg || "")) return t;
+    const wrongs = dedupeCsvItems([leftCard?.realName, leftCard?.displayName, "Lux", "LUX", "Luna"]).filter(n => n && n.toLowerCase() !== customerName.toLowerCase());
+    for (const wrong of wrongs) {
+      const start = new RegExp(`^\\s*${luxEscapeRegExp(wrong)}\\s*,?\\s+`, "i");
+      if (start.test(t)) t = t.replace(start, `${customerName}, `);
+    }
+    return t;
   }
 
   function parseExistingMemberNote(noteText) {
@@ -1508,6 +1767,7 @@ async function lux_ensureAccess() {
 
   function buildSystemPrompt(leftCard, customSystem, imageNotes, imageIntent = "unknown") {
     const card = personaCardLine(leftCard) || "";
+    const customerContext = luxCustomerContextLine(leftCard);
     const modelName = lux_normalizeModelName(GM_getValue("lux_model", MODEL_DEFAULT)).toLowerCase();
     const tc = buildTimeContext();
     const last = (window.__LUX_LAST_USER || "");
@@ -1548,6 +1808,7 @@ async function lux_ensureAccess() {
       "Do not say you in that photo unless the customer clearly says it is them.",
       "Never sexualize a person in an image unless the customer explicitly says it is them.",
       `Current image intent guess, ${imageIntent}. Use it as guidance, but if uncertain stay neutral.`,
+      "If the image intent is profile-picture-comment, the customer is reacting to your profile picture, not sending their own photo. Do not call it his picture, do not describe it as something he sent, and answer the compliment or comment naturally.",
       "Only talk about the profile about section when the customer explicitly asks you to check or read their profile.",
       "If you discuss their profile, respond to its tone and intention naturally, not like a checklist, and do not say I took a peek, I checked your profile, or your profile gives me.",
       "Avoid stock filler about building connection or heat.",
@@ -1559,6 +1820,7 @@ async function lux_ensureAccess() {
       "Name asks, use the real name from the profile parentheses when giving your name.",
       "If asked about your job or work, answer with an age appropriate job and keep it believable.",
       `If you need a job line, use this as your job, ${jobLine}.`,
+      "Keep profile jobs age appropriate and varied. Do not default every persona to admin support, hospital work, or the same occupation.",
       "Do not engage with incest, bestiality, drug use, or racism. Refuse and redirect softly if they come up.",
       "Banned language, do not use oh, oh wow, flattered, enthusiasm, enthusaism, sizzling, non food spicy, or flirt words.",
       "Form, one short paragraph, no emojis, usually 45 to 120 words. Use the longer end only for layered customer messages.",
@@ -1578,7 +1840,7 @@ async function lux_ensureAccess() {
     else if (modelName.includes("deepseek/deepseek-chat")) flavor = "Be natural and conversational, strong at roleplay, with smooth scene flow, vivid emotion, and grounded dialogue. Avoid sounding instructional or formal.";
 
     const customBlock = customSystem && customSystem.trim() ? ` Custom persona is active. Treat this as the main character voice, backstory, personality, habits, job, rhythm, emotional style, and relationship energy for LUX. Follow it strongly unless it conflicts with platform boundaries, ${customSystem.trim()}.` : "";
-    return `${baseCore}${photoContext} ${imageRules} ${flavor}${customBlock}${bridgeBlock} ${salutationBlock}${card}`;
+    return `${baseCore}${photoContext} ${imageRules} ${flavor}${customBlock}${bridgeBlock} ${salutationBlock}${card} ${customerContext}`;
   }
 
   let shortHistory = [];
@@ -1784,7 +2046,8 @@ async function lux_ensureAccess() {
         "Only use comma, period, question mark, and apostrophe.",
         "No emojis. Keep it to 2 to 4 natural sentences.",
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-        personaCardLine(profileCard) || ""
+        personaCardLine(profileCard) || "",
+        luxCustomerContextLine(profileCard) || ""
       ].join(" ");
 
       const user = [
@@ -1831,7 +2094,8 @@ async function lux_ensureAccess() {
         "Only use comma, period, question mark, and apostrophe.",
         "Return only 2 sentences.",
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
-        personaCardLine(profileCard) || ""
+        personaCardLine(profileCard) || "",
+        luxCustomerContextLine(profileCard) || ""
       ].join(" ");
       const user = `Context: ${kindLine}\nCustomer: "${(customerMsg || "").slice(0, 260)}"\nReply with a brief refusal and redirect to a safer subject.`;
       let out = "";
@@ -2036,6 +2300,7 @@ async function lux_ensureAccess() {
     if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") t = LUXPatch.NoRepeat.scrub(t);
     t = luxEnsureQuestion(t, window.__LUX_LAST_USER);
     t = luxEnsureEnding(t);
+    t = luxFixWrongCustomerName(t, window.__LUX_LAST_USER, window.__LUX_CURRENT_LEFT_CARD);
     return clampToLimit(t);
   }
 
@@ -2386,6 +2651,8 @@ async function lux_ensureAccess() {
     const rawMsg = stripStampsAll(split.text || "");
     const imageNotes = (split.notes || "").trim();
     window.__LUX_LAST_USER = rawMsg;
+    window.__LUX_CURRENT_LEFT_CARD = leftCard;
+    luxUpdateCustomerMemoryFromText(rawMsg);
 
     const latestClientRow = (() => {
       try {
@@ -2435,7 +2702,8 @@ async function lux_ensureAccess() {
           "Only use comma, period, question mark, and apostrophe.",
           `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
           qGuide,
-          personaCardLine(leftCard) || ""
+          personaCardLine(leftCard) || "",
+          luxCustomerContextLine(leftCard) || ""
         ].join(" ");
         const user = `Customer message: "${rawMsg.slice(0, 260)}"\nAbout text: "${profileText.slice(0, 900)}"\nWrite one natural response about the profile.`;
         try {
@@ -2461,7 +2729,7 @@ async function lux_ensureAccess() {
     if (Safety.askName(rawMsg)) {
       const profName = (leftCard && leftCard.realName) ? leftCard.realName : "Luna";
       const sys = luxCustomPersonaLayer() + " Natural English in the profile country style. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
-      const user = `They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
+      const user = `They asked your name. Use exactly: "${profName}". ${personaCardLine(leftCard) || ""} ${luxCustomerContextLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
       let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], { max_tokens: 100, temperature: 0.30, top_p: 0.88 });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
       if (luxNeedsHardMeetupRepair(rawMsg, line)) line = await Safety.modelRefusal("meet", leftCard, rawMsg);
@@ -2477,7 +2745,7 @@ async function lux_ensureAccess() {
     if (Safety.wantsLocation(rawMsg)) {
       const profCity = (leftCard && leftCard.location) ? leftCard.location : "nearby";
       const sys = luxCustomPersonaLayer() + " If asked where you are, give city only. No address. One short paragraph. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
-      const user = `City only: "${profCity}". ${personaCardLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
+      const user = `City only: "${profCity}". ${personaCardLine(leftCard) || ""} ${luxCustomerContextLine(leftCard) || ""}\nCustomer: "${rawMsg.slice(0, 240)}"`;
       let line = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], { max_tokens: 100, temperature: 0.30, top_p: 0.88 });
       line = await Safety.enforceNoMeetAccept(rawMsg, line, leftCard);
       if (luxNeedsHardMeetupRepair(rawMsg, line)) line = await Safety.modelRefusal("meet", leftCard, rawMsg);
@@ -2505,7 +2773,9 @@ async function lux_ensureAccess() {
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         `Profile age is ${leftCard?.age || "unknown"}, your job must fit your age.`,
         `Use this job line as your job, ${jobLine}.`,
-        qGuide
+        "Keep the job answer believable for the profile age and do not default everyone to admin support or hospital work.",
+        qGuide,
+        luxCustomerContextLine(leftCard) || ""
       ].join(" ");
       const user = `They asked about your job.\nCustomer: "${rawMsg.slice(0, 240)}"\nReply in one short paragraph and end with exactly one open ended question if it feels natural.`;
       let out = await llmCall([{ role: "system", content: sys }, { role: "user", content: user }], { max_tokens: 115, temperature: 0.45, top_p: 0.90 });
@@ -2552,7 +2822,7 @@ async function lux_ensureAccess() {
 
     const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
     let userPayload = { role: "user", content: rawMsg };
-    if (latestImage) {
+    if (latestImage && imageIntent !== "profile-picture-comment") {
       userPayload = {
         role: "user",
         content: [
