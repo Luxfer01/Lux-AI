@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.12
-// @description  Old LUX voice retained with Grok/DeepSeek/Claude only, stronger custom persona, two image selectors, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory and profile-picture-comment detection.
+// @version      14.6.13
+// @description  LUX 14.6.12 base with only light canned phrase cleanup plus Grok 4.20/4.3 added while keeping Grok 4 Fast, Claude, and DeepSeek.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -192,12 +192,16 @@ async function lux_ensureAccess() {
 
   const MODEL_PRESETS = {
     "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
+    "x-ai/grok-4.20": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 420 },
+    "x-ai/grok-4.3": { temperature: 0.70, top_p: 0.95, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43 },
     "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
     "deepseek/deepseek-chat": { temperature: 1.0, top_p: 0.98, repetition_penalty: 1.02, max_tokens: 200, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
   };
 
   const LUX_SUPPORTED_MODELS = [
     "x-ai/grok-4-fast",
+    "x-ai/grok-4.20",
+    "x-ai/grok-4.3",
     "anthropic/claude-3.5-sonnet",
     "deepseek/deepseek-chat"
   ];
@@ -1732,8 +1736,16 @@ async function lux_ensureAccess() {
   function luxScrubCannedPhrases(text) {
     let t = String(text || "");
     const bad = [
-      /\bthat caught me off guard\.?\s*/gi,
-      /\bi can picture that\.?\s*/gi,
+      /\bthat\s+caught\s+me\s+off\s+guard\.?\s*/gi,
+      /\bthat\s+(?:really\s+|actually\s+)?(?:caught|got)\s+me\s+(?:a\s+little\s+)?(?:off\s+guard|by\s+surprise)\.?\s*/gi,
+      /\bthat\s+(?:picture|photo|image)(?:\s+has|(?:'|’)s)?\s+caught\s+me\s+off\s+guard\.?\s*/gi,
+      /\b(?:the|your|that)\s+(?:picture|photo|image)\s+caught\s+me\s+off\s+guard\.?\s*/gi,
+      /\bi\s+can\s+picture\s+that\.?\s*/gi,
+      /\bi\s+can\s+imagine\s+that\.?\s*/gi,
+      /\bif\s+(?:it|this|that)\s+(?:had\s+)?ended\s+(?:well|perfectly),?\s+what\s+would\s+it\s+look\s+like\??\s*/gi,
+      /\bif\s+(?:the\s+)?(?:day|night|evening|moment)\s+(?:had\s+)?ended\s+(?:well|perfectly),?\s+what\s+would\s+it\s+look\s+like\??\s*/gi,
+      /\bwhat\s+would\s+it\s+look\s+like\s+if\s+(?:it|this|that|the\s+day|the\s+night|the\s+evening|the\s+moment)\s+(?:had\s+)?ended\s+(?:well|perfectly)\??\s*/gi,
+      /\bwhat\s+would\s+you\s+do\s+if\s+you\s+were\s+(?:right\s+)?here\s+(?:right\s+)?now\??\s*/gi,
       /\bif today ended (?:well|perfectly),? what would it look like\??\s*/gi,
       /\bi took a peek at your profile\.?\s*/gi,
       /\bi checked your profile\.?\s*/gi,
@@ -2526,6 +2538,8 @@ async function lux_ensureAccess() {
 
   const modelChoices = [
     "x-ai/grok-4-fast",
+    "x-ai/grok-4.20",
+    "x-ai/grok-4.3",
     "anthropic/claude-3.5-sonnet",
     "deepseek/deepseek-chat"
   ];
