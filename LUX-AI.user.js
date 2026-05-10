@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.15
-// @description  Old LUX voice retained with Grok/Grok 4.20/Grok 4.3/DeepSeek/Claude, stronger custom persona, two image selectors, clean latest-p message reading, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory and profile-picture-comment detection.
+// @version      14.6.16
+// @description  Old LUX voice retained with Grok/DeepSeek/Claude only, stronger custom persona, two image selectors, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory and profile-picture-comment detection.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -166,9 +166,8 @@ async function lux_ensureAccess() {
   const PERSONA_COUNTRY_SEL = "div.col-auto.navbar-text.fw-bold.d-inline";
   const THREAD_SEL = "div#message-list.flex-grow-1.overflow-auto.p-4";
   const CLIENT_MSG_SELECTOR = "div.d-flex.flex-row-reverse.my-2.message-box";
-  const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
   const MESSAGE_TEXT_SELECTOR = "p";
-  const LATEST_CUSTOMER_ROW_SELECTOR = CLIENT_MSG_SELECTOR;
+  const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
   const MEMBER_TIME_SEL = "span#memberTime.fw-bold";
   const AGE_SELECTOR = "td.p-1.ps-3.bg-light-subtle";
   const MEMBER_NOTE_SAVE_SELECTOR = "button.btn.btn-secondary";
@@ -194,8 +193,8 @@ async function lux_ensureAccess() {
 
   const MODEL_PRESETS = {
     "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
-    "x-ai/grok-4.20": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 42, reasoning: { exclude: true } },
-    "x-ai/grok-4.3": { temperature: 0.70, top_p: 0.95, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43, reasoning: { effort: "low", exclude: true } },
+    "x-ai/grok-4.20": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43 },
+    "x-ai/grok-4.3": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 47 },
     "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
     "deepseek/deepseek-chat": { temperature: 1.0, top_p: 0.98, repetition_penalty: 1.02, max_tokens: 200, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
   };
@@ -531,6 +530,21 @@ async function lux_ensureAccess() {
       /\btake\s+a\s+look\s+at\s+my\s+profile\b/i.test(text || "");
   }
 
+
+  function luxExtractMessageTextFromRow(node) {
+    try {
+      if (!node) return "";
+      const parts = [...node.querySelectorAll(MESSAGE_TEXT_SELECTOR)].map(p => {
+        try { return (p.innerText || p.textContent || "").trim(); }
+        catch { return ""; }
+      }).filter(Boolean);
+      if (parts.length) return parts.join("\n").trim();
+      return (node.innerText || node.textContent || "").trim();
+    } catch {
+      return (node?.innerText || node?.textContent || "").trim();
+    }
+  }
+
   function luxElementTextBits(el) {
     try {
       if (!el) return "";
@@ -594,18 +608,13 @@ async function lux_ensureAccess() {
 
   function luxFindCustomerImageElements(node) {
     if (!node) return [];
-    if (!(node.matches && node.matches(LATEST_CUSTOMER_ROW_SELECTOR))) return [];
-    if (!luxIsLatestCustomerRow(node)) return [];
     if (luxIsProfilePictureCommentRow(node)) return [];
     const found = [];
     const seen = new Set();
     try {
       const direct = [...node.querySelectorAll(CLIENT_IMAGE_SELECTOR)];
       for (const el of direct) {
-        if (!node.contains(el)) continue;
-        if (el.closest("[class*='avatar'], [class*='profile-avatar'], [class*='profile-pic'], [class*='navbar'], [class*='flag'], [class*='emoji'], [class*='icon'], button")) continue;
         const actual = (el.tagName && el.tagName.toLowerCase() === "img") ? el : ((el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img")) || el);
-        if (!actual || !node.contains(actual)) continue;
         const url = luxExtractUrlFromImageLike(actual || el);
         const key = `${url}|${actual?.outerHTML?.slice(0, 120) || el.outerHTML?.slice(0, 120) || ""}`;
         if (seen.has(key)) continue;
@@ -664,7 +673,6 @@ async function lux_ensureAccess() {
   }
   function luxGetLatestClientImageUrlFromMessage(messageNode) {
     try {
-      if (!luxIsLatestCustomerRow(messageNode)) return "";
       const imgs = luxFindCustomerImageElements(messageNode);
       const img = imgs.length ? imgs[imgs.length - 1] : null;
       return luxExtractUrlFromImageLike(img);
@@ -674,11 +682,10 @@ async function lux_ensureAccess() {
   }
 
   function getImageNotes(node) {
-    if (!node || !luxIsLatestCustomerRow(node)) return [];
+    if (!node) return [];
     const imgs = luxFindCustomerImageElements(node);
-    const latestImg = imgs.length ? imgs[imgs.length - 1] : null;
     const notes = [];
-    [latestImg].filter(Boolean).forEach(img => {
+    imgs.forEach(img => {
       const alt = (img.getAttribute && (img.getAttribute("alt") || img.getAttribute("title") || img.getAttribute("aria-label"))) || "";
       const src = luxExtractUrlFromImageLike(img);
       const r = img.getBoundingClientRect ? img.getBoundingClientRect() : { width: img.width || 0, height: img.height || 0 };
@@ -775,117 +782,12 @@ async function lux_ensureAccess() {
     return t.trim();
   }
 
-  function luxIsElementVisibleForRead(el) {
-    try {
-      if (!el) return false;
-      const style = window.getComputedStyle ? getComputedStyle(el) : null;
-      if (style && (style.display === "none" || style.visibility === "hidden")) return false;
-      const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
-      if (r && r.width === 0 && r.height === 0) return false;
-      return true;
-    } catch {
-      return true;
-    }
-  }
-
-  function luxIsUiOnlyLine(text) {
-    const s = normalizeLooseText(text || "");
-    if (!s) return true;
-    return /^(?:message|messages|report|photo|picture|image|sent|seen|read|delivered|edited|delete|reply|replied|comment|liked|typing|online|offline)$/i.test(s);
-  }
-
-  function luxCleanCustomerRowText(text) {
-    const lines = String(text || "")
-      .split(/\r?\n/)
-      .map(x => stripStampsAll(x).trim())
-      .filter(x => x && !luxIsUiOnlyLine(x));
-    return lines.join("\n").replace(/\s{2,}/g, " ").trim();
-  }
-
-  function luxMessageTextFromRow(node) {
-    try {
-      if (!node) return "";
-      const isClientRow = !!(node.matches && node.matches(LATEST_CUSTOMER_ROW_SELECTOR));
-      const direct = [...node.querySelectorAll(MESSAGE_TEXT_SELECTOR)]
-        .filter(el => {
-          try {
-            if (!el || !node.contains(el)) return false;
-            if (el.closest("button, [role='button'], .dropdown, .navbar, .lb-nav, .emoji, .badge, [class*='avatar'], [class*='profile'], [class*='flag']")) return false;
-            if (!luxIsElementVisibleForRead(el)) return false;
-            return true;
-          } catch { return true; }
-        })
-        .map(el => luxCleanCustomerRowText(el.innerText || el.textContent || ""))
-        .filter(Boolean);
-      if (direct.length) return direct.join("\n").trim();
-      if (isClientRow) return luxCleanCustomerRowText(node.innerText || node.textContent || "");
-      return luxCleanCustomerRowText(node.innerText || node.textContent || "");
-    } catch {
-      return luxCleanCustomerRowText(node?.innerText || node?.textContent || "");
-    }
-  }
-
-  function luxRowsInVisualOrder(rows) {
-    try {
-      return [...(rows || [])].map((row, idx) => {
-        let top = idx;
-        let bottom = idx;
-        try {
-          const r = row.getBoundingClientRect ? row.getBoundingClientRect() : null;
-          if (r && Number.isFinite(r.top) && Number.isFinite(r.bottom) && (r.top || r.bottom)) {
-            top = r.top;
-            bottom = r.bottom;
-          }
-        } catch {}
-        return { row, idx, top, bottom };
-      }).sort((a, b) => (a.bottom - b.bottom) || (a.top - b.top) || (a.idx - b.idx)).map(x => x.row);
-    } catch {
-      return [...(rows || [])];
-    }
-  }
-
-  function luxGetLatestCustomerRow(rootArg) {
-    try {
-      const root = rootArg || document.querySelector(THREAD_SEL);
-      if (!root) return null;
-      const rows = [...root.querySelectorAll(LATEST_CUSTOMER_ROW_SELECTOR)]
-        .filter(row => row && luxIsElementVisibleForRead(row));
-      // The customer row selector is the only allowed source for the latest customer turn.
-      // Use the newest matching row in DOM order, matching the stable 14.6.12 reading flow.
-      return rows.length ? rows[rows.length - 1] : null;
-    } catch {
-      return null;
-    }
-  }
-
-  function luxGetMessageRowsInOrder(rootArg) {
-    try {
-      const root = rootArg || document.querySelector(THREAD_SEL);
-      if (!root) return [];
-      // Keep history in DOM order, but only the latest customer selector row can trigger a reply or provide images.
-      return [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
-    } catch {
-      return [];
-    }
-  }
-
-  function luxIsLatestCustomerRow(node) {
-    try {
-      if (!node || !(node.matches && node.matches(LATEST_CUSTOMER_ROW_SELECTOR))) return false;
-      const latest = window.__LUX_LATEST_CUSTOMER_ROW || luxGetLatestCustomerRow();
-      return !!latest && node === latest;
-    } catch {
-      return false;
-    }
-  }
-
-  function extractMessageContent(node) {
-    const rawText = luxMessageTextFromRow(node);
-    const rowTextForDetection = (node?.innerText || node?.textContent || rawText || "").trim();
-    const profilePicComment = luxIsProfilePictureCommentRow(node, rowTextForDetection);
+  function extractMessageContent(node, includeImageMeta = true) {
+    const rawText = luxExtractMessageTextFromRow(node);
+    const profilePicComment = luxIsProfilePictureCommentRow(node, rawText);
     const cleanedRawText = profilePicComment ? luxStripProfilePictureCommentUiText(rawText) : rawText;
     const text = stripStampsAll(stripInlineImageNotes(cleanedRawText));
-    const imageNotes = (!profilePicComment && luxIsLatestCustomerRow(node)) ? getImageNotes(node) : [];
+    const imageNotes = (includeImageMeta && !profilePicComment) ? getImageNotes(node) : [];
     if (!imageNotes.length) return text;
     const meta = `${LUX_IMG_START} ${imageNotes.join(" | ")} ${LUX_IMG_END}`;
     return text ? `${text}\n${meta}` : meta;
@@ -1748,7 +1650,6 @@ async function lux_ensureAccess() {
     const p = { ...payload };
     if ("transforms" in p) delete p.transforms;
     if ("logit_bias" in p && !p.logit_bias) delete p.logit_bias;
-    if (p.reasoning && typeof p.reasoning === "object" && !Object.keys(p.reasoning).length) delete p.reasoning;
 
     if (m.includes("llama-3.2-3b") && p.max_tokens > 260) p.max_tokens = 220;
     return p;
@@ -2466,7 +2367,6 @@ async function lux_ensureAccess() {
       repetition_penalty: tuned.repetition_penalty,
       stop: tuned.stop,
       seed: tuned.seed,
-      reasoning: tuned.reasoning,
       ...overrides
     }, model);
 
@@ -2777,9 +2677,16 @@ async function lux_ensureAccess() {
     window.__LUX_CURRENT_LEFT_CARD = leftCard;
     luxUpdateCustomerMemoryFromText(rawMsg);
 
-    const latestClientRow = (window.__LUX_LATEST_CUSTOMER_ROW && luxIsLatestCustomerRow(window.__LUX_LATEST_CUSTOMER_ROW))
-      ? window.__LUX_LATEST_CUSTOMER_ROW
-      : luxGetLatestCustomerRow();
+    const latestClientRow = (() => {
+      try {
+        const thread = document.querySelector(THREAD_SEL);
+        if (!thread) return null;
+        const rows = [...thread.querySelectorAll(CLIENT_MSG_SELECTOR)];
+        return rows.length ? rows[rows.length - 1] : null;
+      } catch {
+        return null;
+      }
+    })();
 
     const imageIntent = luxInferImageIntent(latestClientRow, rawMsg);
 
@@ -2937,17 +2844,12 @@ async function lux_ensureAccess() {
     const historyForModel = lux_buildHistoryByTokens(lux_historyWithoutCurrentUser(shortHistory, rawMsg), LUX_HISTORY_TOKEN_BUDGET);
 
     const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
-    const latestUserTextForModel = rawMsg
-      ? `Latest customer message: ${rawMsg}
-Reply directly to this latest message. Use earlier chat only as background.`
-      : "Latest customer message: Customer sent a photo. Reply directly to this latest customer photo. Use earlier chat only as background.";
-
-    let userPayload = { role: "user", content: latestUserTextForModel };
+    let userPayload = { role: "user", content: rawMsg };
     if (latestImage && imageIntent !== "profile-picture-comment") {
       userPayload = {
         role: "user",
         content: [
-          { type: "text", text: latestUserTextForModel },
+          { type: "text", text: rawMsg || "Customer sent a photo." },
           { type: "image_url", image_url: { url: latestImage } }
         ]
       };
@@ -2977,8 +2879,7 @@ Reply directly to this latest message. Use earlier chat only as background.`
       max_tokens: tuned.max_tokens,
       repetition_penalty: tuned.repetition_penalty,
       stop: tuned.stop,
-      seed: tuned.seed,
-      reasoning: tuned.reasoning
+      seed: tuned.seed
     }, chosenModel);
 
     try {
@@ -3174,26 +3075,27 @@ Reply directly to this latest message. Use earlier chat only as background.`
     const root = document.querySelector(THREAD_SEL);
     if (!root) return;
 
-    const latestCustomerRow = luxGetLatestCustomerRow(root);
-    if (!latestCustomerRow) return;
-    window.__LUX_LATEST_CUSTOMER_ROW = latestCustomerRow;
+    const latestClientRows = [...root.querySelectorAll(CLIENT_MSG_SELECTOR)];
+    const latestClientRow = latestClientRows.length ? latestClientRows[latestClientRows.length - 1] : null;
+    if (!latestClientRow) return;
 
-    const nodes = luxGetMessageRowsInOrder(root);
+    const nodes = [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
     const turns = [];
     for (const row of nodes) {
       const fromClient = row.matches(CLIENT_MSG_SELECTOR);
-      const content = extractMessageContent(row);
-      if (content) turns.push({ role: fromClient ? "user" : "assistant", content: stripStampsKeepMeta(content) });
+      const includeImageMeta = fromClient && row === latestClientRow;
+      const content = fromClient ? extractMessageContent(row, includeImageMeta) : stripStampsAll(stripInlineImageNotes(luxExtractMessageTextFromRow(row)));
+      if (content) turns.push({ role: fromClient ? "user" : "assistant", content: stripStampsKeepMeta(content), row });
     }
 
-    const latestContent = extractMessageContent(latestCustomerRow);
+    const latestContent = extractMessageContent(latestClientRow, true);
     if (!latestContent) return;
 
     const split = extractLuxImageMeta(latestContent || "");
     const cleanForUI = stripStampsAll(split.text || "");
     const imageOnly = !cleanForUI && !!(split.notes || "").trim();
     const uiText = cleanForUI || (imageOnly ? "Customer sent a photo." : "");
-    const seenSig = `latest_user_row:${cleanForUI}|${(split.notes || "").trim()}|${hashStr(latestContent)}`;
+    const seenSig = `latest_user:${cleanForUI}|${(split.notes || "").trim()}`;
     if (!uiText || seenSig === lastSeen) return;
     lastSeen = seenSig;
 
