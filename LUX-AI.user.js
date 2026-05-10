@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.13
+// @version      14.6.15
 // @description  Old LUX voice retained with Grok/Grok 4.20/Grok 4.3/DeepSeek/Claude, stronger custom persona, two image selectors, clean latest-p message reading, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory and profile-picture-comment detection.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
@@ -168,6 +168,7 @@ async function lux_ensureAccess() {
   const CLIENT_MSG_SELECTOR = "div.d-flex.flex-row-reverse.my-2.message-box";
   const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
   const MESSAGE_TEXT_SELECTOR = "p";
+  const LATEST_CUSTOMER_ROW_SELECTOR = CLIENT_MSG_SELECTOR;
   const MEMBER_TIME_SEL = "span#memberTime.fw-bold";
   const AGE_SELECTOR = "td.p-1.ps-3.bg-light-subtle";
   const MEMBER_NOTE_SAVE_SELECTOR = "button.btn.btn-secondary";
@@ -593,13 +594,18 @@ async function lux_ensureAccess() {
 
   function luxFindCustomerImageElements(node) {
     if (!node) return [];
+    if (!(node.matches && node.matches(LATEST_CUSTOMER_ROW_SELECTOR))) return [];
+    if (!luxIsLatestCustomerRow(node)) return [];
     if (luxIsProfilePictureCommentRow(node)) return [];
     const found = [];
     const seen = new Set();
     try {
       const direct = [...node.querySelectorAll(CLIENT_IMAGE_SELECTOR)];
       for (const el of direct) {
+        if (!node.contains(el)) continue;
+        if (el.closest("[class*='avatar'], [class*='profile-avatar'], [class*='profile-pic'], [class*='navbar'], [class*='flag'], [class*='emoji'], [class*='icon'], button")) continue;
         const actual = (el.tagName && el.tagName.toLowerCase() === "img") ? el : ((el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img")) || el);
+        if (!actual || !node.contains(actual)) continue;
         const url = luxExtractUrlFromImageLike(actual || el);
         const key = `${url}|${actual?.outerHTML?.slice(0, 120) || el.outerHTML?.slice(0, 120) || ""}`;
         if (seen.has(key)) continue;
@@ -658,7 +664,9 @@ async function lux_ensureAccess() {
   }
   function luxGetLatestClientImageUrlFromMessage(messageNode) {
     try {
-      const img = luxFindCustomerImageElements(messageNode)[0];
+      if (!luxIsLatestCustomerRow(messageNode)) return "";
+      const imgs = luxFindCustomerImageElements(messageNode);
+      const img = imgs.length ? imgs[imgs.length - 1] : null;
       return luxExtractUrlFromImageLike(img);
     } catch {
       return "";
@@ -666,10 +674,11 @@ async function lux_ensureAccess() {
   }
 
   function getImageNotes(node) {
-    if (!node) return [];
+    if (!node || !luxIsLatestCustomerRow(node)) return [];
     const imgs = luxFindCustomerImageElements(node);
+    const latestImg = imgs.length ? imgs[imgs.length - 1] : null;
     const notes = [];
-    imgs.forEach(img => {
+    [latestImg].filter(Boolean).forEach(img => {
       const alt = (img.getAttribute && (img.getAttribute("alt") || img.getAttribute("title") || img.getAttribute("aria-label"))) || "";
       const src = luxExtractUrlFromImageLike(img);
       const r = img.getBoundingClientRect ? img.getBoundingClientRect() : { width: img.width || 0, height: img.height || 0 };
@@ -766,26 +775,107 @@ async function lux_ensureAccess() {
     return t.trim();
   }
 
+  function luxIsElementVisibleForRead(el) {
+    try {
+      if (!el) return false;
+      const style = window.getComputedStyle ? getComputedStyle(el) : null;
+      if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+      const r = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+      if (r && r.width === 0 && r.height === 0) return false;
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
+  function luxIsUiOnlyLine(text) {
+    const s = normalizeLooseText(text || "");
+    if (!s) return true;
+    return /^(?:message|messages|report|photo|picture|image|sent|seen|read|delivered|edited|delete|reply|replied|comment|liked|typing|online|offline)$/i.test(s);
+  }
+
+  function luxCleanCustomerRowText(text) {
+    const lines = String(text || "")
+      .split(/\r?\n/)
+      .map(x => stripStampsAll(x).trim())
+      .filter(x => x && !luxIsUiOnlyLine(x));
+    return lines.join("\n").replace(/\s{2,}/g, " ").trim();
+  }
+
   function luxMessageTextFromRow(node) {
     try {
       if (!node) return "";
+      const isClientRow = !!(node.matches && node.matches(LATEST_CUSTOMER_ROW_SELECTOR));
       const direct = [...node.querySelectorAll(MESSAGE_TEXT_SELECTOR)]
         .filter(el => {
           try {
-            if (!el) return false;
-            if (el.closest("button, [role='button'], .dropdown, .navbar, .lb-nav, .emoji, .badge")) return false;
-            const style = window.getComputedStyle ? getComputedStyle(el) : null;
-            if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+            if (!el || !node.contains(el)) return false;
+            if (el.closest("button, [role='button'], .dropdown, .navbar, .lb-nav, .emoji, .badge, [class*='avatar'], [class*='profile'], [class*='flag']")) return false;
+            if (!luxIsElementVisibleForRead(el)) return false;
             return true;
           } catch { return true; }
         })
-        .map(el => (el.innerText || el.textContent || "").trim())
-        .filter(Boolean)
-        .filter(t => !/^(?:message|report|photo|picture|image|sent|seen|read|delivered|edited)$/i.test(t));
+        .map(el => luxCleanCustomerRowText(el.innerText || el.textContent || ""))
+        .filter(Boolean);
       if (direct.length) return direct.join("\n").trim();
-      return (node.innerText || node.textContent || "").trim();
+      if (isClientRow) return luxCleanCustomerRowText(node.innerText || node.textContent || "");
+      return luxCleanCustomerRowText(node.innerText || node.textContent || "");
     } catch {
-      return (node?.innerText || node?.textContent || "").trim();
+      return luxCleanCustomerRowText(node?.innerText || node?.textContent || "");
+    }
+  }
+
+  function luxRowsInVisualOrder(rows) {
+    try {
+      return [...(rows || [])].map((row, idx) => {
+        let top = idx;
+        let bottom = idx;
+        try {
+          const r = row.getBoundingClientRect ? row.getBoundingClientRect() : null;
+          if (r && Number.isFinite(r.top) && Number.isFinite(r.bottom) && (r.top || r.bottom)) {
+            top = r.top;
+            bottom = r.bottom;
+          }
+        } catch {}
+        return { row, idx, top, bottom };
+      }).sort((a, b) => (a.bottom - b.bottom) || (a.top - b.top) || (a.idx - b.idx)).map(x => x.row);
+    } catch {
+      return [...(rows || [])];
+    }
+  }
+
+  function luxGetLatestCustomerRow(rootArg) {
+    try {
+      const root = rootArg || document.querySelector(THREAD_SEL);
+      if (!root) return null;
+      const rows = [...root.querySelectorAll(LATEST_CUSTOMER_ROW_SELECTOR)]
+        .filter(row => row && luxIsElementVisibleForRead(row));
+      // The customer row selector is the only allowed source for the latest customer turn.
+      // Use the newest matching row in DOM order, matching the stable 14.6.12 reading flow.
+      return rows.length ? rows[rows.length - 1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function luxGetMessageRowsInOrder(rootArg) {
+    try {
+      const root = rootArg || document.querySelector(THREAD_SEL);
+      if (!root) return [];
+      // Keep history in DOM order, but only the latest customer selector row can trigger a reply or provide images.
+      return [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
+    } catch {
+      return [];
+    }
+  }
+
+  function luxIsLatestCustomerRow(node) {
+    try {
+      if (!node || !(node.matches && node.matches(LATEST_CUSTOMER_ROW_SELECTOR))) return false;
+      const latest = window.__LUX_LATEST_CUSTOMER_ROW || luxGetLatestCustomerRow();
+      return !!latest && node === latest;
+    } catch {
+      return false;
     }
   }
 
@@ -795,7 +885,7 @@ async function lux_ensureAccess() {
     const profilePicComment = luxIsProfilePictureCommentRow(node, rowTextForDetection);
     const cleanedRawText = profilePicComment ? luxStripProfilePictureCommentUiText(rawText) : rawText;
     const text = stripStampsAll(stripInlineImageNotes(cleanedRawText));
-    const imageNotes = profilePicComment ? [] : getImageNotes(node);
+    const imageNotes = (!profilePicComment && luxIsLatestCustomerRow(node)) ? getImageNotes(node) : [];
     if (!imageNotes.length) return text;
     const meta = `${LUX_IMG_START} ${imageNotes.join(" | ")} ${LUX_IMG_END}`;
     return text ? `${text}\n${meta}` : meta;
@@ -2687,16 +2777,9 @@ async function lux_ensureAccess() {
     window.__LUX_CURRENT_LEFT_CARD = leftCard;
     luxUpdateCustomerMemoryFromText(rawMsg);
 
-    const latestClientRow = (() => {
-      try {
-        const thread = document.querySelector(THREAD_SEL);
-        if (!thread) return null;
-        const rows = [...thread.querySelectorAll(CLIENT_MSG_SELECTOR)];
-        return rows.length ? rows[rows.length - 1] : null;
-      } catch {
-        return null;
-      }
-    })();
+    const latestClientRow = (window.__LUX_LATEST_CUSTOMER_ROW && luxIsLatestCustomerRow(window.__LUX_LATEST_CUSTOMER_ROW))
+      ? window.__LUX_LATEST_CUSTOMER_ROW
+      : luxGetLatestCustomerRow();
 
     const imageIntent = luxInferImageIntent(latestClientRow, rawMsg);
 
@@ -2854,12 +2937,17 @@ async function lux_ensureAccess() {
     const historyForModel = lux_buildHistoryByTokens(lux_historyWithoutCurrentUser(shortHistory, rawMsg), LUX_HISTORY_TOKEN_BUDGET);
 
     const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
-    let userPayload = { role: "user", content: rawMsg };
+    const latestUserTextForModel = rawMsg
+      ? `Latest customer message: ${rawMsg}
+Reply directly to this latest message. Use earlier chat only as background.`
+      : "Latest customer message: Customer sent a photo. Reply directly to this latest customer photo. Use earlier chat only as background.";
+
+    let userPayload = { role: "user", content: latestUserTextForModel };
     if (latestImage && imageIntent !== "profile-picture-comment") {
       userPayload = {
         role: "user",
         content: [
-          { type: "text", text: rawMsg || "Customer sent a photo." },
+          { type: "text", text: latestUserTextForModel },
           { type: "image_url", image_url: { url: latestImage } }
         ]
       };
@@ -3086,7 +3174,11 @@ async function lux_ensureAccess() {
     const root = document.querySelector(THREAD_SEL);
     if (!root) return;
 
-    const nodes = [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
+    const latestCustomerRow = luxGetLatestCustomerRow(root);
+    if (!latestCustomerRow) return;
+    window.__LUX_LATEST_CUSTOMER_ROW = latestCustomerRow;
+
+    const nodes = luxGetMessageRowsInOrder(root);
     const turns = [];
     for (const row of nodes) {
       const fromClient = row.matches(CLIENT_MSG_SELECTOR);
@@ -3094,16 +3186,14 @@ async function lux_ensureAccess() {
       if (content) turns.push({ role: fromClient ? "user" : "assistant", content: stripStampsKeepMeta(content) });
     }
 
-    // Only the newest visible customer row is allowed to trigger LUX.
-    // Older customer messages stay as background memory, but LUX must not answer them.
-    const latestTurn = turns.length ? turns[turns.length - 1] : null;
-    if (!latestTurn || latestTurn.role !== "user") return;
+    const latestContent = extractMessageContent(latestCustomerRow);
+    if (!latestContent) return;
 
-    const split = extractLuxImageMeta(latestTurn.content || "");
+    const split = extractLuxImageMeta(latestContent || "");
     const cleanForUI = stripStampsAll(split.text || "");
     const imageOnly = !cleanForUI && !!(split.notes || "").trim();
     const uiText = cleanForUI || (imageOnly ? "Customer sent a photo." : "");
-    const seenSig = `latest_user:${cleanForUI}|${(split.notes || "").trim()}`;
+    const seenSig = `latest_user_row:${cleanForUI}|${(split.notes || "").trim()}|${hashStr(latestContent)}`;
     if (!uiText || seenSig === lastSeen) return;
     lastSeen = seenSig;
 
@@ -3123,7 +3213,7 @@ async function lux_ensureAccess() {
       }, delay);
     }
 
-    callBackend(latestTurn.content);
+    callBackend(latestContent);
   }
 
   function setupThreadWatcher() {
