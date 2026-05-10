@@ -2,7 +2,7 @@
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
 // @version      14.6.13
-// @description  LUX 14.6.12 base with only light canned phrase cleanup plus Grok 4.20/4.3 added while keeping Grok 4 Fast, Claude, and DeepSeek.
+// @description  Old LUX voice retained with Grok/Grok 4.20/Grok 4.3/DeepSeek/Claude, stronger custom persona, two image selectors, clean latest-p message reading, natural questions, cleaner punctuation, and no canned openers with restored chat-history memory and profile-picture-comment detection.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -167,6 +167,7 @@ async function lux_ensureAccess() {
   const THREAD_SEL = "div#message-list.flex-grow-1.overflow-auto.p-4";
   const CLIENT_MSG_SELECTOR = "div.d-flex.flex-row-reverse.my-2.message-box";
   const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
+  const MESSAGE_TEXT_SELECTOR = "p";
   const MEMBER_TIME_SEL = "span#memberTime.fw-bold";
   const AGE_SELECTOR = "td.p-1.ps-3.bg-light-subtle";
   const MEMBER_NOTE_SAVE_SELECTOR = "button.btn.btn-secondary";
@@ -192,8 +193,8 @@ async function lux_ensureAccess() {
 
   const MODEL_PRESETS = {
     "x-ai/grok-4-fast": { temperature: 0.75, top_p: 0.97, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
-    "x-ai/grok-4.20": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 420 },
-    "x-ai/grok-4.3": { temperature: 0.70, top_p: 0.95, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43 },
+    "x-ai/grok-4.20": { temperature: 0.72, top_p: 0.96, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 42, reasoning: { exclude: true } },
+    "x-ai/grok-4.3": { temperature: 0.70, top_p: 0.95, repetition_penalty: 1.02, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43, reasoning: { effort: "low", exclude: true } },
     "anthropic/claude-3.5-sonnet": { temperature: 0.68, top_p: 0.95, repetition_penalty: 1.01, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 53 },
     "deepseek/deepseek-chat": { temperature: 1.0, top_p: 0.98, repetition_penalty: 1.02, max_tokens: 200, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 }
   };
@@ -765,9 +766,33 @@ async function lux_ensureAccess() {
     return t.trim();
   }
 
+  function luxMessageTextFromRow(node) {
+    try {
+      if (!node) return "";
+      const direct = [...node.querySelectorAll(MESSAGE_TEXT_SELECTOR)]
+        .filter(el => {
+          try {
+            if (!el) return false;
+            if (el.closest("button, [role='button'], .dropdown, .navbar, .lb-nav, .emoji, .badge")) return false;
+            const style = window.getComputedStyle ? getComputedStyle(el) : null;
+            if (style && (style.display === "none" || style.visibility === "hidden")) return false;
+            return true;
+          } catch { return true; }
+        })
+        .map(el => (el.innerText || el.textContent || "").trim())
+        .filter(Boolean)
+        .filter(t => !/^(?:message|report|photo|picture|image|sent|seen|read|delivered|edited)$/i.test(t));
+      if (direct.length) return direct.join("\n").trim();
+      return (node.innerText || node.textContent || "").trim();
+    } catch {
+      return (node?.innerText || node?.textContent || "").trim();
+    }
+  }
+
   function extractMessageContent(node) {
-    const rawText = (node?.innerText || "").trim();
-    const profilePicComment = luxIsProfilePictureCommentRow(node, rawText);
+    const rawText = luxMessageTextFromRow(node);
+    const rowTextForDetection = (node?.innerText || node?.textContent || rawText || "").trim();
+    const profilePicComment = luxIsProfilePictureCommentRow(node, rowTextForDetection);
     const cleanedRawText = profilePicComment ? luxStripProfilePictureCommentUiText(rawText) : rawText;
     const text = stripStampsAll(stripInlineImageNotes(cleanedRawText));
     const imageNotes = profilePicComment ? [] : getImageNotes(node);
@@ -1633,6 +1658,7 @@ async function lux_ensureAccess() {
     const p = { ...payload };
     if ("transforms" in p) delete p.transforms;
     if ("logit_bias" in p && !p.logit_bias) delete p.logit_bias;
+    if (p.reasoning && typeof p.reasoning === "object" && !Object.keys(p.reasoning).length) delete p.reasoning;
 
     if (m.includes("llama-3.2-3b") && p.max_tokens > 260) p.max_tokens = 220;
     return p;
@@ -1736,16 +1762,8 @@ async function lux_ensureAccess() {
   function luxScrubCannedPhrases(text) {
     let t = String(text || "");
     const bad = [
-      /\bthat\s+caught\s+me\s+off\s+guard\.?\s*/gi,
-      /\bthat\s+(?:really\s+|actually\s+)?(?:caught|got)\s+me\s+(?:a\s+little\s+)?(?:off\s+guard|by\s+surprise)\.?\s*/gi,
-      /\bthat\s+(?:picture|photo|image)(?:\s+has|(?:'|’)s)?\s+caught\s+me\s+off\s+guard\.?\s*/gi,
-      /\b(?:the|your|that)\s+(?:picture|photo|image)\s+caught\s+me\s+off\s+guard\.?\s*/gi,
-      /\bi\s+can\s+picture\s+that\.?\s*/gi,
-      /\bi\s+can\s+imagine\s+that\.?\s*/gi,
-      /\bif\s+(?:it|this|that)\s+(?:had\s+)?ended\s+(?:well|perfectly),?\s+what\s+would\s+it\s+look\s+like\??\s*/gi,
-      /\bif\s+(?:the\s+)?(?:day|night|evening|moment)\s+(?:had\s+)?ended\s+(?:well|perfectly),?\s+what\s+would\s+it\s+look\s+like\??\s*/gi,
-      /\bwhat\s+would\s+it\s+look\s+like\s+if\s+(?:it|this|that|the\s+day|the\s+night|the\s+evening|the\s+moment)\s+(?:had\s+)?ended\s+(?:well|perfectly)\??\s*/gi,
-      /\bwhat\s+would\s+you\s+do\s+if\s+you\s+were\s+(?:right\s+)?here\s+(?:right\s+)?now\??\s*/gi,
+      /\bthat caught me off guard\.?\s*/gi,
+      /\bi can picture that\.?\s*/gi,
       /\bif today ended (?:well|perfectly),? what would it look like\??\s*/gi,
       /\bi took a peek at your profile\.?\s*/gi,
       /\bi checked your profile\.?\s*/gi,
@@ -2358,6 +2376,7 @@ async function lux_ensureAccess() {
       repetition_penalty: tuned.repetition_penalty,
       stop: tuned.stop,
       seed: tuned.seed,
+      reasoning: tuned.reasoning,
       ...overrides
     }, model);
 
@@ -2870,7 +2889,8 @@ async function lux_ensureAccess() {
       max_tokens: tuned.max_tokens,
       repetition_penalty: tuned.repetition_penalty,
       stop: tuned.stop,
-      seed: tuned.seed
+      seed: tuned.seed,
+      reasoning: tuned.reasoning
     }, chosenModel);
 
     try {
