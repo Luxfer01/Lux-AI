@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.7.8
+// @version      14.7.12
 // @description  LUX upgraded with stricter latest-image handling, no-pool questions, natural profile reactions, softer human refusals, improved punctuation, and stronger anti-repeat memory.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
@@ -166,6 +166,7 @@ async function lux_ensureAccess() {
   const PERSONA_COUNTRY_SEL = "div.col-auto.navbar-text.fw-bold.d-inline";
   const THREAD_SEL = "div#message-list.flex-grow-1.overflow-auto.p-4";
   const CLIENT_MSG_SELECTOR = "div.d-flex.flex-row-reverse.my-2.message-box";
+  const MESSAGE_TEXT_SELECTOR = "p";
   const PERSONA_MSG_SELECTOR = "div.d-flex.flex-row.my-2";
   const MEMBER_TIME_SEL = "span#memberTime.fw-bold";
   const AGE_SELECTOR = "td.p-1.ps-3.bg-light-subtle";
@@ -173,7 +174,11 @@ async function lux_ensureAccess() {
   const ABOUT_USER_SELECTOR = "p#about-user";
   const LUX_NOTE_LAST_HASH_KEY = "lux_member_note_last_hash_v1";
 
-  const CLIENT_IMAGE_SELECTOR = "img.rounded.mb-2";
+  const CLIENT_IMAGE_SELECTORS = [
+    "img.rounded.mb-2",
+    "div.lb-nav"
+  ];
+  const CLIENT_IMAGE_SELECTOR = CLIENT_IMAGE_SELECTORS.join(",");
   const LUX_IMG_START = "LUX_IMG_NOTES_START";
   const LUX_IMG_END = "LUX_IMG_NOTES_END";
 
@@ -188,6 +193,8 @@ async function lux_ensureAccess() {
 
   const MODEL_PRESETS = {
     "x-ai/grok-4-fast": { temperature: 0.78, top_p: 0.96, repetition_penalty: 1.04, max_tokens: 250, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 37 },
+    "x-ai/grok-4.20": { temperature: 0.76, top_p: 0.96, repetition_penalty: 1.04, max_tokens: 250, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43 },
+    "x-ai/grok-4.3": { temperature: 0.72, top_p: 0.95, repetition_penalty: 1.04, max_tokens: 250, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 47 },
     "deepseek/deepseek-chat": { temperature: 0.86, top_p: 0.94, repetition_penalty: 1.05, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 41 },
     "openai/gpt-4.1": { temperature: 0.64, top_p: 0.92, repetition_penalty: 1.03, max_tokens: 255, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 33 },
     "openai/gpt-4.1-mini": { temperature: 0.68, top_p: 0.93, repetition_penalty: 1.04, max_tokens: 235, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 29 },
@@ -497,29 +504,78 @@ If you ask a question, make it specific, human, and easy to answer.
       /\btake\s+a\s+look\s+at\s+my\s+profile\b/i.test(text || "");
   }
 
-  function luxImageLooksUsable(img) {
+
+  function luxExtractMessageTextFromRow(node) {
     try {
-      if (!img) return false;
-      if (img.matches && !img.matches(CLIENT_IMAGE_SELECTOR)) return false;
+      if (!node) return "";
+      const parts = [...node.querySelectorAll(MESSAGE_TEXT_SELECTOR)].map(p => {
+        try { return (p.innerText || p.textContent || "").trim(); }
+        catch { return ""; }
+      }).filter(Boolean);
+      if (parts.length) return parts.join("\n").trim();
+      return (node.innerText || node.textContent || "").trim();
+    } catch {
+      return (node?.innerText || node?.textContent || "").trim();
+    }
+  }
 
-      const src = (img.currentSrc || img.src || img.getAttribute("src") || "").trim();
-      if (!src) return false;
+  function luxElementTextBits(el) {
+    try {
+      if (!el) return "";
+      return [
+        el.getAttribute && el.getAttribute("alt"),
+        el.getAttribute && el.getAttribute("title"),
+        el.getAttribute && el.getAttribute("aria-label"),
+        el.getAttribute && el.getAttribute("data-caption"),
+        el.getAttribute && el.getAttribute("data-title"),
+        el.className,
+        el.id
+      ].map(x => String(x || "")).join(" ").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
 
-      const classAlt = [
-        img.className || "",
-        img.getAttribute("alt") || "",
-        img.getAttribute("title") || "",
-        img.getAttribute("aria-label") || ""
-      ].join(" ").toLowerCase();
+  function luxExtractUrlFromImageLike(el) {
+    try {
+      if (!el) return "";
+      const img = el.tagName && el.tagName.toLowerCase() === "img" ? el : el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img");
+      if (img) {
+        const src = (img.currentSrc || img.src || img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-original") || "").trim();
+        if (src) return src;
+        const a = img.closest && img.closest("a[href]");
+        if (a && a.href) return a.href.trim();
+      }
+      const a = el.closest && el.closest("a[href]");
+      if (a && a.href) return a.href.trim();
+      const innerA = el.querySelector && el.querySelector("a[href]");
+      if (innerA && innerA.href) return innerA.href.trim();
+      const style = (el.getAttribute && el.getAttribute("style")) || "";
+      const bg = style.match(/url\(["']?([^"')]+)["']?\)/i);
+      if (bg && bg[1]) return bg[1].trim();
+      const cssBg = window.getComputedStyle ? (getComputedStyle(el).backgroundImage || "") : "";
+      const bg2 = cssBg.match(/url\(["']?([^"')]+)["']?\)/i);
+      if (bg2 && bg2[1]) return bg2[1].trim();
+      return "";
+    } catch {
+      return "";
+    }
+  }
 
-      if (/\b(avatar|user avatar|profile avatar|profile image|profile picture|profile photo|flag|emoji|icon|logo|badge|spinner|loader)\b/i.test(classAlt)) return false;
-      if (/\b(flag|emoji|icon|logo|badge|spinner|loader|avatar)\b/i.test(src)) return false;
-      if (img.closest('[class*="avatar"], [class*="profile-avatar"], [class*="navbar"], [class*="dropdown"], [class*="flag"], [class*="emoji"], button')) return false;
-
-      const rect = img.getBoundingClientRect ? img.getBoundingClientRect() : { width: 0, height: 0 };
-      const w = img.naturalWidth || img.width || rect.width || 0;
-      const h = img.naturalHeight || img.height || rect.height || 0;
-      if (w && h && (w < 64 || h < 64)) return false;
+  function luxImageLooksUsable(el) {
+    try {
+      if (!el) return false;
+      const actual = (el.tagName && el.tagName.toLowerCase() === "img") ? el : ((el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img")) || el);
+      const url = luxExtractUrlFromImageLike(actual || el);
+      const bits = `${url} ${luxElementTextBits(actual || el)}`.toLowerCase();
+      if (!url && !/lb-nav|rounded|image|photo|picture/.test(bits)) return false;
+      if (/avatar|profile-avatar|flag|emoji|icon|badge|logo|navbar|sprite|blank|placeholder|spinner|loader/.test(bits)) return false;
+      if ((actual || el).closest && (actual || el).closest('[class*="avatar"], [class*="profile-avatar"], [class*="navbar"], [class*="dropdown"], [class*="flag"], [class*="emoji"], button')) return false;
+      const target = actual || el;
+      const r = target.getBoundingClientRect ? target.getBoundingClientRect() : { width: target.width || 0, height: target.height || 0 };
+      const w = target.naturalWidth || target.width || r.width || 0;
+      const h = target.naturalHeight || target.height || r.height || 0;
+      if (w && h && (w < 35 || h < 35)) return false;
       return true;
     } catch {
       return false;
@@ -531,7 +587,18 @@ If you ask a question, make it specific, human, and easy to answer.
       if (!messageNode) return [];
       if (messageNode.matches && !messageNode.matches(CLIENT_MSG_SELECTOR)) return [];
       const candidates = [...messageNode.querySelectorAll(CLIENT_IMAGE_SELECTOR)];
-      return candidates.filter(luxImageLooksUsable);
+      const found = [];
+      const seen = new Set();
+      for (const el of candidates) {
+        const actual = (el.tagName && el.tagName.toLowerCase() === "img") ? el : ((el.querySelector && el.querySelector("img.rounded.mb-2, img.lb-image, img")) || el);
+        if (!luxImageLooksUsable(actual || el)) continue;
+        const url = luxExtractUrlFromImageLike(actual || el);
+        const key = `${url}|${actual?.outerHTML?.slice(0, 120) || el.outerHTML?.slice(0, 120) || ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        found.push(actual || el);
+      }
+      return found;
     } catch {
       return [];
     }
@@ -542,9 +609,7 @@ If you ask a question, make it specific, human, and easy to answer.
       const imgs = luxGetImagesFromExactMessageRow(messageNode);
       if (!imgs.length) return "";
       const img = imgs[imgs.length - 1];
-      const parentLink = img.closest("a");
-      if (parentLink && parentLink.href && !/javascript:/i.test(parentLink.href)) return parentLink.href.trim();
-      return (img.currentSrc || img.src || img.getAttribute("src") || "").trim();
+      return luxExtractUrlFromImageLike(img);
     } catch {
       return "";
     }
@@ -580,18 +645,19 @@ If you ask a question, make it specific, human, and easy to answer.
     const imgs = luxGetImagesFromExactMessageRow(node);
     const notes = [];
     imgs.forEach(img => {
-      const alt = (img.getAttribute("alt") || "").trim();
-      const src = (img.currentSrc || img.getAttribute("src") || "").trim();
-      const w = img.naturalWidth || img.width || 0;
-      const h = img.naturalHeight || img.height || 0;
+      const alt = (img.getAttribute && (img.getAttribute("alt") || img.getAttribute("title") || img.getAttribute("aria-label"))) || "";
+      const src = luxExtractUrlFromImageLike(img);
+      const r = img.getBoundingClientRect ? img.getBoundingClientRect() : { width: img.width || 0, height: img.height || 0 };
+      const w = Math.round(img.naturalWidth || img.width || r.width || 0);
+      const h = Math.round(img.naturalHeight || img.height || r.height || 0);
       let name = "";
       if (src) {
         const clean = src.split("?")[0];
         name = clean.split("/").pop() || "";
       }
       const parts = [];
-      if (alt && !/avatar|profile|flag|emoji|icon|logo|badge/i.test(alt)) parts.push(`alt text ${alt}`);
-      if (name && !/avatar|flag|emoji|icon|logo|badge/i.test(name)) parts.push(`file ${name}`);
+      if (alt && !/avatar|profile|flag|emoji|icon|logo|badge/i.test(alt)) parts.push(`alt text ${String(alt).trim()}`);
+      if (name && !/avatar|profile|flag|emoji|icon|logo|badge/i.test(name)) parts.push(`file ${name}`);
       if (w && h) parts.push(`size ${w}x${h}`);
       notes.push(parts.length ? parts.join(", ") : "latest customer image attached");
     });
@@ -675,10 +741,10 @@ If you ask a question, make it specific, human, and easy to answer.
     return t.trim();
   }
 
-  function extractMessageContent(node) {
-    const rawText = (node?.innerText || "").trim();
+  function extractMessageContent(node, includeImageMeta = true) {
+    const rawText = luxExtractMessageTextFromRow(node);
     const text = stripStampsAll(stripInlineImageNotes(rawText));
-    const imageNotes = getImageNotes(node);
+    const imageNotes = includeImageMeta ? getImageNotes(node) : [];
     if (!imageNotes.length) return text;
     const meta = `${LUX_IMG_START} ${imageNotes.join(" | ")} ${LUX_IMG_END}`;
     return text ? `${text}\n${meta}` : meta;
@@ -883,15 +949,15 @@ If you ask a question, make it specific, human, and easy to answer.
 
   function luxModelSupportsVision(modelName) {
     const m = String(modelName || "").toLowerCase();
-    return m.includes("openai/gpt-4.1") || m.includes("anthropic/claude");
+    return m.includes("openai/gpt-4.1") || m.includes("anthropic/claude") || m.includes("x-ai/grok-4.20") || m.includes("x-ai/grok-4.3");
   }
 
   function luxInferImageIntent(messageNode, messageText) {
     const text = String(messageText || "").toLowerCase();
     const rawNodeText = String(messageNode?.innerText || "").toLowerCase();
     const img = luxGetImagesFromExactMessageRow(messageNode)[0] || null;
-    const src = String((img?.currentSrc || img?.src || "")).toLowerCase();
-    const alt = String((img?.getAttribute("alt") || "")).toLowerCase();
+    const src = String(luxExtractUrlFromImageLike(img) || "").toLowerCase();
+    const alt = String((img && img.getAttribute && (img.getAttribute("alt") || img.getAttribute("title") || img.getAttribute("aria-label"))) || "").toLowerCase();
     const blob = `${text} ${rawNodeText} ${src} ${alt}`;
     if (luxIsProfilePhotoComment(blob)) return "profile_comment";
     if (/\b(that'?s me|this is me|my photo|my pic|my picture|my selfie|selfie of me|here is me|here'?s me)\b/i.test(text)) return "selfie";
@@ -2502,6 +2568,8 @@ function luxCleanImageAssumption(text) {
 
   const modelChoices = [
     "x-ai/grok-4-fast",
+    "x-ai/grok-4.20",
+    "x-ai/grok-4.3",
     "deepseek/deepseek-chat",
     "openai/gpt-4.1",
     "openai/gpt-4.1-mini",
@@ -3118,22 +3186,27 @@ function luxCleanImageAssumption(text) {
     const root = document.querySelector(THREAD_SEL);
     if (!root) return;
 
+    const latestClientRows = [...root.querySelectorAll(CLIENT_MSG_SELECTOR)];
+    const latestClientRow = latestClientRows.length ? latestClientRows[latestClientRows.length - 1] : null;
+    if (!latestClientRow) return;
+
     const nodes = [...root.querySelectorAll(`${CLIENT_MSG_SELECTOR}, ${PERSONA_MSG_SELECTOR}`)];
     const turns = [];
     for (const row of nodes) {
       const fromClient = row.matches(CLIENT_MSG_SELECTOR);
+      const includeImageMeta = fromClient && row === latestClientRow;
       const content = fromClient
-        ? extractMessageContent(row)
-        : stripStampsAll(stripInlineImageNotes(row?.innerText || ""));
+        ? extractMessageContent(row, includeImageMeta)
+        : stripStampsAll(stripInlineImageNotes(luxExtractMessageTextFromRow(row)));
       if (content) turns.push({ role: fromClient ? "user" : "assistant", content: stripStampsKeepMeta(content), row });
     }
 
-    const lastUser = turns.slice().reverse().find(t => t.role === "user");
+    const lastUser = turns.find(t => t.role === "user" && t.row === latestClientRow);
     if (!lastUser) return;
 
     const split = extractLuxImageMeta(lastUser.content || "");
     const cleanForUI = stripStampsAll(split.text || "");
-    const imageNotes = getImageNotes(lastUser.row).join(" | ").trim();
+    const imageNotes = getImageNotes(latestClientRow).join(" | ").trim();
     if (!cleanForUI && !imageNotes) return;
 
     const turnSig = String(hashStr(`${cleanForUI}|${imageNotes}`));
@@ -3161,7 +3234,7 @@ function luxCleanImageAssumption(text) {
       }
     }
 
-    callBackend(lastUser.content, lastUser.row).then(ok => {
+    callBackend(lastUser.content, latestClientRow).then(ok => {
       if (ok !== false) lastSeen = turnSig;
     }).catch(err => {
       console.warn("LUX auto generation failed", err);
