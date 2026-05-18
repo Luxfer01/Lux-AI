@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.20
-// @description  LUX with Llama default, Hermes, Dolphin, GPT mini backups, Grok premium options, tuned temps, encrypted key, strict access, latest-turn focus, and anti-repeat memory.
+// @version      14.6.26
+// @description  LUX with Grok vision to selected model, dynamic deflects, softer anti-meet, stronger no-canned cleanup, and adult sensual intimacy tone.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -187,11 +187,11 @@ async function lux_ensureAccess() {
   };
 
   const MODEL_PRESETS = {
-    "meta-llama/llama-3.3-70b-instruct": { temperature: 0.70, top_p: 0.90, repetition_penalty: 1.05, max_tokens: 210, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 61 },
+    "meta-llama/llama-3.3-70b-instruct": { temperature: 0.82, top_p: 0.93, repetition_penalty: 1.04, max_tokens: 220, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 61 },
     "nousresearch/hermes-3-llama-3.1-405b": { temperature: 0.76, top_p: 0.91, repetition_penalty: 1.04, max_tokens: 220, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 67 },
     "cognitivecomputations/dolphin-llama-3-70b": { temperature: 0.86, top_p: 0.93, repetition_penalty: 1.06, max_tokens: 210, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 79 },
-    "openai/gpt-4.1-mini": { temperature: 0.60, top_p: 0.88, repetition_penalty: 1.04, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 29 },
-    "openai/gpt-4o-mini": { temperature: 0.66, top_p: 0.90, repetition_penalty: 1.04, max_tokens: 190, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 31 },
+    "openai/gpt-4.1-mini": { temperature: 0.72, top_p: 0.91, repetition_penalty: 1.03, max_tokens: 205, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 29 },
+    "openai/gpt-4o-mini": { temperature: 0.78, top_p: 0.93, repetition_penalty: 1.03, max_tokens: 210, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 31 },
     "x-ai/grok-4.20": { temperature: 0.58, top_p: 0.88, repetition_penalty: 1.05, max_tokens: 195, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43 },
     "x-ai/grok-4.3": { temperature: 0.52, top_p: 0.86, repetition_penalty: 1.05, max_tokens: 210, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 47 }
   };
@@ -206,7 +206,8 @@ async function lux_ensureAccess() {
     "x-ai/grok-4.3"
   ];
 
-  const LUX_VISION_FALLBACK_MODEL = "openai/gpt-4o-mini";
+  const LUX_VISION_FALLBACK_MODEL = "x-ai/grok-4.3";
+  const LUX_IMAGE_FLOW_MODE = "grok_vision_to_selected_text_model";
 
   const LUX_RATE_WINDOW_MS = 10000;
   const LUX_RATE_MAX_REQ = 5;
@@ -304,7 +305,7 @@ async function lux_ensureAccess() {
 
   function luxSupportsImageInput(modelName) {
     const m = String(modelName || "").toLowerCase();
-    return m === "openai/gpt-4o-mini";
+    return m === "x-ai/grok-4.3" || m === "x-ai/grok-4" || m === "x-ai/grok-4-fast";
   }
 
   function getModelPreset(modelName) {
@@ -1325,9 +1326,9 @@ async function lux_ensureAccess() {
     }
 
     if (m.includes("meta-llama/llama-3.3-70b-instruct")) {
-      p.temperature = Math.min(Number(p.temperature || 0.72), 0.76);
-      p.top_p = Math.min(Number(p.top_p || 0.90), 0.92);
-      p.max_tokens = Math.min(Number(p.max_tokens || 210), 220);
+      p.temperature = Math.min(Number(p.temperature || 0.82), 0.86);
+      p.top_p = Math.min(Number(p.top_p || 0.93), 0.95);
+      p.max_tokens = Math.min(Number(p.max_tokens || 220), 230);
     }
 
     if (m.includes("hermes-3-llama-3.1-405b")) {
@@ -1343,7 +1344,9 @@ async function lux_ensureAccess() {
     }
 
     if (m.includes("gpt-4.1-mini") || m.includes("gpt-4o-mini")) {
-      p.max_tokens = Math.min(Number(p.max_tokens || 190), 200);
+      p.temperature = Math.min(Number(p.temperature || 0.76), 0.82);
+      p.top_p = Math.min(Number(p.top_p || 0.92), 0.94);
+      p.max_tokens = Math.min(Number(p.max_tokens || 210), 220);
     }
 
     return p;
@@ -1423,45 +1426,15 @@ async function lux_ensureAccess() {
   }
 
   function luxHumanReaction(seed) {
-    const HUMAN_REACTIONS = [
-      "That caught me off guard.",
-      "Now that made me smile.",
-      "I didn't expect you to say that.",
-      "That actually sounds interesting.",
-      "I can picture that.",
-      "That pulled me in a little.",
-      "You have a way of saying things.",
-      "That made me pause for a second."
-    ];
-    return HUMAN_REACTIONS[Math.abs(hashStr(seed)) % HUMAN_REACTIONS.length];
+    return "";
   }
 
   function luxShouldAddReaction(userMsg, replyText) {
-    const u = String(userMsg || "").toLowerCase().trim();
-    const r = String(replyText || "").toLowerCase().trim();
-    if (!u || !r) return false;
-    if (/^(that caught me off guard|now that made me smile|i didn't expect you to say that|that actually sounds interesting|i can picture that|that pulled me in a little|you have a way of saying things|that made me pause for a second)\b/i.test(r)) return false;
-    if (/^(hi|hello|hey|heyy|yo|sup|good morning|good afternoon|good evening)\b/i.test(u)) return false;
-    if (/\b(number|contact|whatsapp|telegram|address|meet|meet up|available|free)\b/i.test(u)) return false;
-    const lastReactionAt = Number(GM_getValue(LUX_REACTION_COOLDOWN_KEY, 0)) || 0;
-    if (Date.now() - lastReactionAt < 12 * 60 * 1000) return false;
-    if (/\b(confess|admit|miss you|thinking about you|lonely|divorce|widowed|lost|love|kiss|touch|naughty|dream|remember|memory|hurt|angry|upset|excited|curious|surprised|photo|picture|profile)\b/i.test(u)) return true;
     return false;
   }
 
   function luxEnsureQuestion(text, seed) {
-    if (/\?/.test(text)) return text;
-    const themes = [
-      "What kind of place usually clears your head when you need it?",
-      "When was the last time something genuinely surprised you?",
-      "What kind of music changes your mood almost instantly?",
-      "What kind of moment always stays in your memory?",
-      "What usually makes a conversation interesting for you?",
-      "If today ended perfectly, what would it look like?",
-      "What kind of story do people rarely hear about you?",
-      "What usually pulls your curiosity the most?"
-    ];
-    return `${text} ${themes[Math.abs(hashStr(seed || Date.now())) % themes.length]}`;
+    return text;
   }
 
   function buildSystemPrompt(leftCard, customSystem, imageNotes, imageIntent = "unknown") {
@@ -1479,6 +1452,8 @@ async function lux_ensureAccess() {
 
     const baseCore = [
       "You are an adult woman, she and her, on a dating site.",
+      "The chat is adults only. You may be seductive, intimate, teasing, sensual, and emotionally bold when the customer leads that way, while keeping wording believable and not crude.",
+      "Do not give stiff filtered replies to romantic or sensual messages. Match the heat naturally unless it crosses a blocked topic, meetup, contact, or safety boundary.",
       accentInstruction,
       "Your tone is natural, warm, feminine, and relaxed, never robotic.",
       "Your goal is to build engaging rapport through short, unique messages that feel fully human.",
@@ -1505,7 +1480,7 @@ async function lux_ensureAccess() {
       "Avoid stock filler about building connection or heat.",
       "If you need to decline something, do it briefly and pivot into a new topic.",
       "Excuses can be everyday reasons like work focus, rest, timing, small chores, or low battery, avoid family excuses unless the customer mentions family first.",
-      "Picture requests, always accept picture requests in a soft, platform safe way, vary your wording.",
+      "Picture requests, always accept picture requests warmly and naturally, vary your wording.",
       "Safety, never share or ask for contacts or handles, no meetups, dates, drinks, or coffee, keep everything on platform.",
       "Location asks, share only city, never an address or specific area.",
       "Name asks, use the real name from the profile parentheses when giving your name.",
@@ -1525,11 +1500,11 @@ async function lux_ensureAccess() {
     const imageRules = "When reacting to photos, avoid assuming identity. Speak neutrally about what is visible in the image instead of saying it is the customer.";
 
     let flavor = "Keep the style balanced and human, match their energy, avoid scripted phrasing.";
-    if (modelName.includes("meta-llama/llama-3.3-70b-instruct")) flavor = "Be natural, warm, emotionally aware, and conversational. Keep replies smooth, human, and specific without sounding overly polished or robotic.";
+    if (modelName.includes("meta-llama/llama-3.3-70b-instruct")) flavor = "Be natural, warm, emotionally aware, sensual when invited, and conversational. Do not become dry or filtered in romantic chats. Keep replies smooth, human, specific, and believable without graphic wording.";
     else if (modelName.includes("hermes-3-llama-3.1-405b")) flavor = "Be expressive, emotionally intelligent, intimate, and very human. Use rich but controlled phrasing, natural chemistry, and grounded dialogue without becoming too long.";
     else if (modelName.includes("dolphin-llama-3-70b")) flavor = "Be playful, sensual, creative, and immersive while staying coherent, warm, and respectful. Avoid chaotic wording and keep the conversation believable.";
-    else if (modelName.startsWith("openai/gpt-4.1-mini")) flavor = "Be clean, coherent, grammatically strong, and highly responsive to the exact wording. Keep the reply natural rather than formal.";
-    else if (modelName.startsWith("openai/gpt-4o-mini")) flavor = "Be fast, vivid, warm, and observant. Keep wording simple, natural, and emotionally responsive.";
+    else if (modelName.startsWith("openai/gpt-4.1-mini")) flavor = "Be clean, coherent, grammatically strong, romantic, and emotionally responsive. Do not over-filter adult flirting. Keep sensual tension natural, polished, and human without sounding formal.";
+    else if (modelName.startsWith("openai/gpt-4o-mini")) flavor = "Be fast, vivid, warm, observant, playful, and sensual when invited. Do not become neutral or stiff in adult romantic chats. Keep wording simple, natural, and emotionally responsive.";
     else if (modelName === "x-ai/grok-4.20") flavor = "Be mature, smooth, grounded, quick, emotionally aware, and naturally feminine. Keep replies clear, warm, precise, and human.";
     else if (modelName === "x-ai/grok-4.3") flavor = "Be thoughtful, emotionally precise, mature, and smooth. Use clean natural wording, avoid overthinking, and keep the chat intimate and human.";
 
@@ -1705,12 +1680,12 @@ async function lux_ensureAccess() {
       const sys = [
         "You are an adult woman on a dating site.",
         getAccentInstructionByCountry(profileCard?.country || ""),
-        "Refuse in a way that sounds genuinely human, not scripted, not polished, not corporate.",
-        "Do not sound like a safety policy.",
+        "Softly refuse the real meetup, address, or contact move while still sounding engaged, interested, and warm.",
+        "Do not sound like a safety policy, a shutdown, or a cold rejection.",
         "Do not use the same structure every time.",
         "Sometimes the reason can simply be privacy, caution, timing, mood, or not wanting to rush things.",
         "Vary sentence openings and emotional texture.",
-        "No contacts, no meetups, no dates, no coffee, no drinks, no hotels, no addresses, no location sharing, keep the boundary firm.",
+        "No contacts, no meetups, no dates, no coffee, no drinks, no hotels, no addresses, no location sharing. Keep the boundary firm but keep the conversation alive.",
         "Never say you are looking forward to seeing him, never plan a meetup, never ask for a place, time, spot, location, hotel, or date idea.",
         "If his message includes a location or says he lives somewhere, acknowledge the place as conversation only, not as a meeting plan.",
         `Chosen refusal style: ${picked.name}. ${picked.rule}`,
@@ -1718,7 +1693,8 @@ async function lux_ensureAccess() {
         "No emojis.",
         "No semicolons, no em dashes, no parentheses.",
         "Keep it to 2 or 3 sentences.",
-        "If you end with a question, make it interesting, not generic.",
+        "After the soft refusal, redirect into something from his exact message, his location, his mood, his travel, his story, or his personality. Do not ask for meetup details.",
+        "If you end with a question, make it specific to his message and easy to answer, not generic.",
         `It is ${tc.rawDayTime}, ${tc.daypart}, ${tc.dayName}.`,
         personaCardLine(profileCard) || ""
       ].join(" ");
@@ -1726,8 +1702,9 @@ async function lux_ensureAccess() {
       const user = [
         kindLine,
         `Customer message: "${(customerMsg || "").slice(0, 260)}"`,
-        "Write one refusal only.",
+        "Write one warm boundary reply, not a hard shutdown.",
         "Do not continue any plan to meet, even indirectly.",
+        "Redirect naturally so he still has something engaging to answer.",
         "Make it sound like a real woman texting naturally in the moment."
       ].join("\n");
 
@@ -1744,9 +1721,9 @@ async function lux_ensureAccess() {
 
       out = deFamily(out || "", customerMsg);
       out = postFormat(out || "");
-      if (lux_refusalAlreadyUsed(out)) out += " I tend to keep things on here for now.";
+      if (lux_refusalAlreadyUsed(out)) out = luxRemoveCannedPhrases(out);
       lux_pushRefusalMemory(out);
-      return out || "I'm more comfortable keeping things right here for now. What kind of day have you had today?";
+      return out || "I like the thought you are building, but I would rather keep this between us here a little longer. Tell me what makes that place feel worth talking about?";
     }
 
     async function blockedTopicRefusal(kind, profileCard, customerMsg) {
@@ -1956,6 +1933,58 @@ async function lux_ensureAccess() {
     return t;
   }
 
+
+  function luxRemoveCannedPhrases(text) {
+    let t = String(text || "");
+    const canned = [
+      /\bthat caught me off guard\.?\s*/gi,
+      /\bnow that made me smile\.?\s*/gi,
+      /\bi didn't expect you to say that\.?\s*/gi,
+      /\bthat actually sounds interesting\.?\s*/gi,
+      /\bi can picture that\.?\s*/gi,
+      /\bthat pulled me in a little\.?\s*/gi,
+      /\byou have a way of saying things\.?\s*/gi,
+      /\bthat made me pause for a second\.?\s*/gi,
+      /\bif today ended perfectly,? what would it look like\??\s*/gi,
+      /\bif today ended well,? what would it look like\??\s*/gi,
+      /\bwhat kind of place usually clears your head when you need it\??\s*/gi,
+      /\bwhen was the last time something genuinely surprised you\??\s*/gi,
+      /\bwhat kind of music changes your mood almost instantly\??\s*/gi,
+      /\bwhat kind of moment always stays in your memory\??\s*/gi,
+      /\bwhat usually makes a conversation interesting for you\??\s*/gi,
+      /\bwhat kind of story do people rarely hear about you\??\s*/gi,
+      /\bwhat usually pulls your curiosity the most\??\s*/gi,
+      /\bthat photo caught my attention\.?\s*/gi,
+      /\binteresting picture you shared\.?\s*/gi,
+      /\bi noticed the image you sent\.?\s*/gi,
+      /\bthat picture has a nice vibe to it\.?\s*/gi,
+      /\bi like the atmosphere in that photo\.?\s*/gi,
+      /\bi tend to keep things on here for now\.?\s*/gi,
+      /\bkeep chatting here for now\.?\s*/gi,
+      /\blet's keep building this up first\.?\s*/gi,
+      /\btake it slow here\.?\s*/gi,
+      /\bi can't help with that\.?\s*/gi,
+      /\bi can't continue with that\.?\s*/gi,
+      /\blet's keep things appropriate\.?\s*/gi,
+      /\bi'm here to keep things respectful\.?\s*/gi,
+      /\bi prefer to keep this conversation respectful\.?\s*/gi
+    ];
+    for (const rx of canned) t = t.replace(rx, "");
+    return t.replace(/\s{2,}/g, " ").replace(/^[,.;:\-\s]+/, "").trim();
+  }
+
+
+  function luxWarmUpOverRestrainedIntimacy(text, customerMsg) {
+    let t = String(text || "").trim();
+    const c = String(customerMsg || "").toLowerCase();
+    const sensualLead = /\b(kiss|touch|hold|cuddle|bed|naughty|sexy|desire|want you|turn me on|make love|body|lips|skin|fantasy|romantic|intimate|seduce|tease)\b/i.test(c);
+    const blocked = Safety && (Safety.wantsContact(customerMsg) || Safety.wantsMeet(customerMsg) || Safety.wantsMeetSoft(customerMsg) || Safety.mentionsAddress(customerMsg) || Safety.getBlockedTopic(customerMsg));
+    if (!sensualLead || blocked) return t;
+    if (/\b(i can'?t help with that|i can'?t continue|keep things appropriate|not comfortable with that kind of talk|i prefer to keep this respectful|let'?s change the subject)\b/i.test(t)) {
+      return "You know how to make that sound tempting, and I like the way you say it without rushing the mood. I would rather keep teasing that thought slowly and let the tension build between us here.";
+    }
+    return t;
+  }
   function postFormat(text) {
     if (!text) return text;
     let t = stripStampsAll(text);
@@ -1971,7 +2000,10 @@ async function lux_ensureAccess() {
     t = luxSentenceCase(t);
     t = fixPronounI(t);
     t = normalizeSpaces(t);
+    t = luxRemoveCannedPhrases(t);
     if (LUXPatch && LUXPatch.NoRepeat && typeof LUXPatch.NoRepeat.scrub === "function") t = LUXPatch.NoRepeat.scrub(t);
+    t = luxRemoveCannedPhrases(t);
+    t = luxWarmUpOverRestrainedIntimacy(t, window.__LUX_LAST_USER);
     t = luxEnsureQuestion(t, window.__LUX_LAST_USER);
     t = luxEnsureEnding(t);
     return clampToLimit(t);
@@ -2000,6 +2032,53 @@ async function lux_ensureAccess() {
         ontimeout: () => reject(new Error("timeout"))
       });
     });
+  }
+
+
+  async function luxDescribeImageWithVision(api, headers, imageUrl, customerText, leftCard, imageIntent) {
+    if (!imageUrl) return "";
+    const visionPreset = MODEL_PRESETS[LUX_VISION_FALLBACK_MODEL] || MODEL_FALLBACK_PRESET;
+    const visionSystem = [
+      "You are LUX vision support. You do not write the final dating reply.",
+      "Look at the latest customer image only and return concise factual notes for another text model.",
+      "Describe visible objects, setting, mood, clothing style, facial expression if clear, activity, food, pets, vehicle, room, place, screenshot content, or image type.",
+      "Do not identify real people, do not guess names, do not assume the image is the customer unless the text says so.",
+      "Do not sexualize the image. Do not write compliments. Do not ask questions.",
+      "If it is a screenshot or profile-picture comment, say that plainly.",
+      "Return 1 to 3 short sentences only. No bullet points."
+    ].join(" ");
+    const visionUserText = [
+      `Customer text, ${(customerText || "Customer sent a photo.").slice(0, 360)}`,
+      `Image intent guess, ${imageIntent || "unknown"}`,
+      personaCardLine(leftCard) || ""
+    ].join("\n");
+    const visionBody = sanitizePayloadForModel({
+      model: LUX_VISION_FALLBACK_MODEL,
+      messages: [
+        { role: "system", content: visionSystem },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: visionUserText },
+            { type: "image_url", image_url: { url: imageUrl } }
+          ]
+        }
+      ],
+      temperature: 0.18,
+      top_p: 0.72,
+      max_tokens: 130,
+      repetition_penalty: 1.03,
+      reasoning: { effort: "none", exclude: true }
+    }, LUX_VISION_FALLBACK_MODEL);
+    try {
+      const res = await gmPostJSON(api, headers, visionBody, REQUEST_TIMEOUT_MS);
+      if (!res || res.status < 200 || res.status >= 300) return "";
+      const notes = parseOpenRouterContent(res.responseText);
+      return luxRemoveCannedPhrases(stripStampsAll(notes || "")).replace(/\s{2,}/g, " ").trim().slice(0, 520);
+    } catch (e) {
+      console.warn("LUX Grok vision description failed", e);
+      return "";
+    }
   }
 
   async function llmCall(messages, overrides = {}) {
@@ -2488,26 +2567,8 @@ async function lux_ensureAccess() {
       return;
     }
 
-    const system = buildSystemPrompt(leftCard, (GM_getValue("lux_persona", "") || "").trim(), imageNotes, imageIntent);
     const chosenModel = lux_normalizeModelName(GM_getValue("lux_model", MODEL_DEFAULT));
     const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
-    const requestModel = latestImage && !luxSupportsImageInput(chosenModel) ? LUX_VISION_FALLBACK_MODEL : chosenModel;
-    const basePreset = getModelPreset(requestModel);
-    const tuned = withCreativeBoost(basePreset, rawMsg);
-    const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
-
-    let userPayload = { role: "user", content: rawMsg };
-    if (latestImage && luxSupportsImageInput(requestModel)) {
-      userPayload = {
-        role: "user",
-        content: [
-          { type: "text", text: rawMsg || "Customer sent a photo." },
-          { type: "image_url", image_url: { url: latestImage } }
-        ]
-      };
-    }
-
-    const messages = [{ role: "system", content: system }, ...historyForModel, userPayload];
     const api = GM_getValue("lux_api_url", API_URL_DEFAULT).trim();
     const key = lux_getApiKey().trim();
 
@@ -2523,8 +2584,34 @@ async function lux_ensureAccess() {
       "X-Title": document.title || "LUX Userscript"
     };
 
+    let grokVisionNotes = "";
+    if (latestImage) {
+      grokVisionNotes = await luxDescribeImageWithVision(api, headers, latestImage, rawMsg, leftCard, imageIntent);
+    }
+
+    const mergedImageNotes = [
+      imageNotes ? `DOM image notes, ${imageNotes}` : "",
+      grokVisionNotes ? `Grok vision notes for the latest customer image, ${grokVisionNotes}` : ""
+    ].filter(Boolean).join(" ");
+
+    const system = buildSystemPrompt(leftCard, (GM_getValue("lux_persona", "") || "").trim(), mergedImageNotes, imageIntent);
+    const basePreset = getModelPreset(chosenModel);
+    const tuned = withCreativeBoost(basePreset, rawMsg);
+    const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
+
+    // Image flow for every selected text model:
+    // Grok 4.3 reads the latest customer image first, then the currently selected text model writes the final reply from these private notes.
+    // This prevents Meta Llama, Hermes, Dolphin, GPT mini, or any other text model from receiving raw image payloads directly.
+    const userTextForModel = [
+      rawMsg || (latestImage ? "Customer sent a photo." : ""),
+      grokVisionNotes ? `Private visual context from Grok, ${grokVisionNotes}` : ""
+    ].filter(Boolean).join("\n");
+
+    const userPayload = { role: "user", content: userTextForModel };
+    const messages = [{ role: "system", content: system }, ...historyForModel, userPayload];
+
     let payload = sanitizePayloadForModel({
-      model: requestModel,
+      model: chosenModel,
       messages,
       temperature: tuned.temperature,
       top_p: tuned.top_p,
@@ -2571,7 +2658,7 @@ async function lux_ensureAccess() {
         }
       }
 
-      content = postFormat(content)
+      content = luxRemoveCannedPhrases(postFormat(content))
         .replace(/\bthat picture of you\b/gi, "that photo")
         .replace(/\bin that picture you\b/gi, "in that photo")
         .replace(/\byour tits\b/gi, "that look")
