@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.18
+// @version      14.6.20
 // @description  LUX with Llama default, Hermes, Dolphin, GPT mini backups, Grok premium options, tuned temps, encrypted key, strict access, latest-turn focus, and anti-repeat memory.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
@@ -206,6 +206,8 @@ async function lux_ensureAccess() {
     "x-ai/grok-4.3"
   ];
 
+  const LUX_VISION_FALLBACK_MODEL = "openai/gpt-4o-mini";
+
   const LUX_RATE_WINDOW_MS = 10000;
   const LUX_RATE_MAX_REQ = 5;
   const LUX_RATE_LOG_KEY = "lux_req_log_v1";
@@ -298,6 +300,11 @@ async function lux_ensureAccess() {
   function lux_normalizeModelName(modelName) {
     const name = (modelName || GM_getValue("lux_model", MODEL_DEFAULT) || "").trim();
     return LUX_SUPPORTED_MODELS.includes(name) ? name : MODEL_DEFAULT;
+  }
+
+  function luxSupportsImageInput(modelName) {
+    const m = String(modelName || "").toLowerCase();
+    return m === "openai/gpt-4o-mini";
   }
 
   function getModelPreset(modelName) {
@@ -734,14 +741,7 @@ async function lux_ensureAccess() {
   }
 
   function luxImageOpeners(seed) {
-    const options = [
-      "That photo caught my attention.",
-      "Interesting picture you shared.",
-      "I noticed the image you sent.",
-      "That picture has a nice vibe to it.",
-      "I like the atmosphere in that photo."
-    ];
-    return options[Math.abs(hashStr(seed)) % options.length];
+    return "";
   }
 
   function luxInferImageIntent(messageNode, messageText) {
@@ -1404,14 +1404,20 @@ async function lux_ensureAccess() {
     return Array.from(banned).slice(0, 160);
   }
 
+  function luxCustomerPushesMeetup(text) {
+    const t = String(text || "").toLowerCase();
+    return /\b(?:meet(?:ing)?\s+(?:with\s+)?you|meet\s*up|meetup|see\s+you|seeing\s+you|get\s+together|hang\s*out|link\s*up|grab\s+(?:coffee|drinks?|dinner|lunch)|go\s+out|come\s+over|come\s+through|pull\s+up|visit\s+you|you\s+visit|at\s+my\s+place|at\s+your\s+place|your\s+place|my\s+place|send\s+me\s+(?:your\s+)?location|where\s+should\s+i\s+come|where\s+can\s+i\s+meet|i\s+live\s+in\b.*\b(?:meet|meeting|see|come|visit)|i\s+am\s+in\b.*\b(?:meet|meeting|see|come|visit)|i\s+can\s+be\s+there|be\s+there\s+soon|hotel|room\s+number|address)\b/i.test(t);
+  }
+
   function luxViolatesMeetupBoundary(text) {
     const t = String(text || "").toLowerCase();
-    return /\b(i'm free|i am free|i'm available|i am available|we can meet|let's meet|let us meet|we should meet|let's go out|we can grab coffee|we can go for drinks|come over|come through|pull up|where should we meet|what time works|tonight works|tomorrow works|i can meet you|i'd love to meet|i would love to meet)\b/i.test(t);
+    if (!t) return false;
+    return /\b(?:i(?:'| a)?m\s+(?:free|available|around)\b|i\s+can\s+meet|i\s+can\s+come|i\s+can\s+be\s+there|i\s+can\s+see\s+you|i(?:'|’)d\s+love\s+to\s+meet|i\s+would\s+love\s+to\s+meet|i(?:'|’)m\s+looking\s+forward\s+to\s+seeing\s+you|looking\s+forward\s+to\s+seeing\s+you|can(?:'|’)t\s+wait\s+to\s+see\s+you|we\s+can\s+(?:meet|link|hang|go\s+out|grab)|let(?:'|’)s\s+(?:meet|link|hang|go\s+out|grab)|we\s+should\s+(?:meet|link|hang|go\s+out)|meeting\s+with\s+you|meet\s*up|meetup|our\s+(?:meetup|meet\s*up|date)|for\s+our\s+(?:meetup|meet\s*up|date)|where\s+should\s+we\s+meet|what\s+time\s+works|tonight\s+works|tomorrow\s+works|come\s+over|come\s+through|pull\s+up|visit\s+me|visit\s+you|my\s+place|your\s+place|send\s+me\s+(?:your\s+)?location|i\s+live\s+in\b.*\b(?:meet|meeting|see|come|visit|together)|suggest\s+for\s+our\s+(?:meet|meetup|date)|spot\s+.*\b(?:meet|meetup|date)|exploring\s+.*\btogether|create\s+together)\b/i.test(t);
   }
 
   function luxNeedsHardMeetupRepair(userMsg, text) {
     if (!userMsg || !text) return false;
-    const askedMeet = Safety.wantsMeet(userMsg) || Safety.wantsMeetSoft(userMsg) || Safety.wantsContact(userMsg) || Safety.mentionsAddress(userMsg);
+    const askedMeet = luxCustomerPushesMeetup(userMsg) || Safety.wantsMeet(userMsg) || Safety.wantsMeetSoft(userMsg) || Safety.wantsContact(userMsg) || Safety.mentionsAddress(userMsg);
     if (!askedMeet) return false;
     return luxViolatesMeetupBoundary(text);
   }
@@ -1704,7 +1710,9 @@ async function lux_ensureAccess() {
         "Do not use the same structure every time.",
         "Sometimes the reason can simply be privacy, caution, timing, mood, or not wanting to rush things.",
         "Vary sentence openings and emotional texture.",
-        "No contacts, no meetups, no addresses, keep the boundary firm.",
+        "No contacts, no meetups, no dates, no coffee, no drinks, no hotels, no addresses, no location sharing, keep the boundary firm.",
+        "Never say you are looking forward to seeing him, never plan a meetup, never ask for a place, time, spot, location, hotel, or date idea.",
+        "If his message includes a location or says he lives somewhere, acknowledge the place as conversation only, not as a meeting plan.",
         `Chosen refusal style: ${picked.name}. ${picked.rule}`,
         "Only use comma, period, question mark, and apostrophe.",
         "No emojis.",
@@ -1719,6 +1727,7 @@ async function lux_ensureAccess() {
         kindLine,
         `Customer message: "${(customerMsg || "").slice(0, 260)}"`,
         "Write one refusal only.",
+        "Do not continue any plan to meet, even indirectly.",
         "Make it sound like a real woman texting naturally in the moment."
       ].join("\n");
 
@@ -1775,10 +1784,12 @@ async function lux_ensureAccess() {
     }
 
     async function enforceNoMeetAccept(userMsg, text, profileCard) {
-      const BAD = /\b(?:i(?:'| )?m\s+(?:free|available)\b|we\s+can\s+(?:meet|link|hang)\b|let'?s\s+(?:meet|link|hang)\b|what\s+time\s+works\b|where\s+should\s+we\s+meet\b|i\s+can\s+pull\s+up\b|come\s+through\b)\b/i;
       if (!text) return text;
-      if (BAD.test(String(text).toLowerCase())) return await modelRefusal("meet", profileCard, userMsg);
-      return deFamily(text, userMsg);
+      let out = deFamily(text, userMsg);
+      if (luxNeedsHardMeetupRepair(userMsg, out) || luxViolatesMeetupBoundary(out)) {
+        return await modelRefusal("meet", profileCard, userMsg);
+      }
+      return out;
     }
 
     return { wantsContact, wantsMeet, wantsMeetSoft, mentionsAddress, askName, wantsLocation, wantsJob, getBlockedTopic, modelRefusal, blockedTopicRefusal, enforceNoMeetAccept };
@@ -2380,6 +2391,18 @@ async function lux_ensureAccess() {
       return;
     }
 
+    if (luxCustomerPushesMeetup(rawMsg) || Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
+      let out = await Safety.modelRefusal("meet", leftCard, rawMsg);
+      out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
+      out = postFormat(out).replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
+      showReplies([out]);
+      pushHist(rawMsg, out);
+      lux_pushRecentReply(out);
+      lux_pushReplyFingerprint(out);
+      luxSpeak(out);
+      return;
+    }
+
     if (Safety.askName(rawMsg)) {
       const profName = (leftCard && leftCard.realName) ? leftCard.realName : "Luna";
       const sys = "Natural English in the profile country style. One short paragraph. No contacts or meetups. No emojis. Only use comma, period, question mark, and apostrophe. Avoid family excuses unless user mentioned family first. Avoid oh, oh wow, flattered, enthusiasm, sizzling, non food spicy, and flirt words. End with one natural, flow matching open ended question created by you. " + getAccentInstructionByCountry(leftCard?.country || "");
@@ -2441,7 +2464,7 @@ async function lux_ensureAccess() {
       return;
     }
 
-    if (Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
+    if (luxCustomerPushesMeetup(rawMsg) || Safety.wantsMeet(rawMsg) || Safety.wantsMeetSoft(rawMsg)) {
       let out = await Safety.modelRefusal("meet", leftCard, rawMsg);
       out = await Safety.enforceNoMeetAccept(rawMsg, out, leftCard);
       out = postFormat(out).replace(/\s{2,}/g, " ").replace(/^\.+/, "").trim();
@@ -2467,13 +2490,14 @@ async function lux_ensureAccess() {
 
     const system = buildSystemPrompt(leftCard, (GM_getValue("lux_persona", "") || "").trim(), imageNotes, imageIntent);
     const chosenModel = lux_normalizeModelName(GM_getValue("lux_model", MODEL_DEFAULT));
-    const basePreset = getModelPreset(chosenModel);
+    const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
+    const requestModel = latestImage && !luxSupportsImageInput(chosenModel) ? LUX_VISION_FALLBACK_MODEL : chosenModel;
+    const basePreset = getModelPreset(requestModel);
     const tuned = withCreativeBoost(basePreset, rawMsg);
     const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
 
-    const latestImage = luxGetLatestClientImageUrlFromMessage(latestClientRow);
     let userPayload = { role: "user", content: rawMsg };
-    if (latestImage) {
+    if (latestImage && luxSupportsImageInput(requestModel)) {
       userPayload = {
         role: "user",
         content: [
@@ -2500,7 +2524,7 @@ async function lux_ensureAccess() {
     };
 
     let payload = sanitizePayloadForModel({
-      model: chosenModel,
+      model: requestModel,
       messages,
       temperature: tuned.temperature,
       top_p: tuned.top_p,
@@ -2535,14 +2559,6 @@ async function lux_ensureAccess() {
       }
 
       let content = raw;
-      if (latestImage) {
-        const opener = luxImageOpeners(`${rawMsg}|${imageIntent}|${chosenModel}`);
-        if (!new RegExp(`^${opener.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(content)) {
-          if (imageIntent === "screenshot" || imageIntent === "meme" || imageIntent === "unknown") {
-            content = `${opener} ${content}`;
-          }
-        }
-      }
 
       content = await Safety.enforceNoMeetAccept(rawMsg, content, leftCard);
       if (luxNeedsHardMeetupRepair(rawMsg, content)) content = await Safety.modelRefusal("meet", leftCard, rawMsg);
