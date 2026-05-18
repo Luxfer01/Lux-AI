@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.26
-// @description  LUX with Grok vision to selected model, dynamic deflects, softer anti-meet, stronger no-canned cleanup, and adult sensual intimacy tone.
+// @version      14.6.29
+// @description  LUX with lightweight Gemini social vision, stronger custom persona priority, dynamic deflects, softer anti-meet, no-canned cleanup, and adult sensual intimacy tone.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -206,8 +206,9 @@ async function lux_ensureAccess() {
     "x-ai/grok-4.3"
   ];
 
-  const LUX_VISION_FALLBACK_MODEL = "x-ai/grok-4.3";
-  const LUX_IMAGE_FLOW_MODE = "grok_vision_to_selected_text_model";
+  const LUX_VISION_FALLBACK_MODEL = "google/gemini-2.0-flash-exp:free";
+  const LUX_IMAGE_FLOW_MODE = "gemini_light_social_vision_to_selected_text_model";
+  const LUX_MAX_VISION_SUMMARY = 180;
 
   const LUX_RATE_WINDOW_MS = 10000;
   const LUX_RATE_MAX_REQ = 5;
@@ -305,7 +306,7 @@ async function lux_ensureAccess() {
 
   function luxSupportsImageInput(modelName) {
     const m = String(modelName || "").toLowerCase();
-    return m === "x-ai/grok-4.3" || m === "x-ai/grok-4" || m === "x-ai/grok-4-fast";
+    return m === "x-ai/grok-4.3" || m === "x-ai/grok-4" || m === "x-ai/grok-4-fast" || m === "google/gemini-2.0-flash-exp:free";
   }
 
   function getModelPreset(modelName) {
@@ -1494,10 +1495,10 @@ async function lux_ensureAccess() {
     ].join(" ");
 
     const photoContext = imageNotes && imageNotes.trim()
-      ? ` The customer attached a photo. Safe notes about the photo, ${imageNotes.trim()}. Only reference what is in these notes, do not invent details.`
+      ? ` The customer attached a photo. Private social image cue, ${imageNotes.trim()}. Use this as a human reaction cue, not as a caption. Do not describe the image mechanically. React naturally in one short phrase only if the image matters to the reply.`
       : "";
 
-    const imageRules = "When reacting to photos, avoid assuming identity. Speak neutrally about what is visible in the image instead of saying it is the customer.";
+    const imageRules = "Photo reaction rule, never say the image shows, I can see, in the photo, or this picture has a nice vibe. Do not use fixed image openers or example-style reactions. React like a real person would in that exact conversation, with one natural comment only if the image matters. For people, do not assume identity unless the customer says it is them. Do not over-describe.";
 
     let flavor = "Keep the style balanced and human, match their energy, avoid scripted phrasing.";
     if (modelName.includes("meta-llama/llama-3.3-70b-instruct")) flavor = "Be natural, warm, emotionally aware, sensual when invited, and conversational. Do not become dry or filtered in romantic chats. Keep replies smooth, human, specific, and believable without graphic wording.";
@@ -1508,8 +1509,10 @@ async function lux_ensureAccess() {
     else if (modelName === "x-ai/grok-4.20") flavor = "Be mature, smooth, grounded, quick, emotionally aware, and naturally feminine. Keep replies clear, warm, precise, and human.";
     else if (modelName === "x-ai/grok-4.3") flavor = "Be thoughtful, emotionally precise, mature, and smooth. Use clean natural wording, avoid overthinking, and keep the chat intimate and human.";
 
-    if (customSystem && customSystem.trim()) return `${customSystem} ${card}`;
-    return `${baseCore}${photoContext} ${imageRules} ${flavor}${card}`;
+    const customBlock = customSystem && customSystem.trim()
+      ? ` Custom persona priority layer, this controls LUX's voice, personality, backstory, speech rhythm, emotional style, sensual style, hobbies, job details, and how she should feel in conversation. Follow it strongly unless it conflicts with safety, anti-meet, contact, address, or latest-message rules. ${customSystem.trim()}`
+      : "";
+    return `${customBlock} ${baseCore}${photoContext} ${imageRules} ${flavor}${card}`;
   }
 
   let shortHistory = [];
@@ -1959,6 +1962,13 @@ async function lux_ensureAccess() {
       /\bi noticed the image you sent\.?\s*/gi,
       /\bthat picture has a nice vibe to it\.?\s*/gi,
       /\bi like the atmosphere in that photo\.?\s*/gi,
+      /\bthat actually looks really clean\.?\s*/gi,
+      /\byour car looks cool\.?\s*/gi,
+      /\byour pet cat looks adorable\.?\s*/gi,
+      /\byour cat looks adorable\.?\s*/gi,
+      /\bthat dog looks adorable\.?\s*/gi,
+      /\bthat looks adorable\.?\s*/gi,
+      /\bthat looks cool\.?\s*/gi,
       /\bi tend to keep things on here for now\.?\s*/gi,
       /\bkeep chatting here for now\.?\s*/gi,
       /\blet's keep building this up first\.?\s*/gi,
@@ -2037,19 +2047,21 @@ async function lux_ensureAccess() {
 
   async function luxDescribeImageWithVision(api, headers, imageUrl, customerText, leftCard, imageIntent) {
     if (!imageUrl) return "";
-    const visionPreset = MODEL_PRESETS[LUX_VISION_FALLBACK_MODEL] || MODEL_FALLBACK_PRESET;
     const visionSystem = [
-      "You are LUX vision support. You do not write the final dating reply.",
-      "Look at the latest customer image only and return concise factual notes for another text model.",
-      "Describe visible objects, setting, mood, clothing style, facial expression if clear, activity, food, pets, vehicle, room, place, screenshot content, or image type.",
-      "Do not identify real people, do not guess names, do not assume the image is the customer unless the text says so.",
-      "Do not sexualize the image. Do not write compliments. Do not ask questions.",
-      "If it is a screenshot or profile-picture comment, say that plainly.",
-      "Return 1 to 3 short sentences only. No bullet points."
+      "You are LUX lightweight vision support. You do not write the final dating reply.",
+      "Your job is to turn the latest customer image into a private social cue for the selected text model.",
+      "No canned wording. No reusable openers. No example phrases. No adjective pools. Invent the cue from this exact image only.",
+      "Do not create an image caption. Do not say the image shows. Do not say I can see. Do not list objects. Do not sound analytical or clinical.",
+      "Think like a real person noticing the image in a chat, then compress that into the subject, the feeling, and the natural social angle.",
+      "For objects, pets, cars, food, rooms, scenery, outfits, or hobbies, give the text model the emotional/social angle, not a description.",
+      "For a person, avoid identity assumptions. Only say it is the customer if the text clearly says so.",
+      "Do not sexualize the image. Do not guess names, ages, addresses, or private details.",
+      "Return one fresh private cue under 24 words. No bullet points. No quotes. No final reply."
     ].join(" ");
     const visionUserText = [
       `Customer text, ${(customerText || "Customer sent a photo.").slice(0, 360)}`,
       `Image intent guess, ${imageIntent || "unknown"}`,
+      "Return a compact private social cue only. Do not use examples, templates, or reusable phrases.",
       personaCardLine(leftCard) || ""
     ].join("\n");
     const visionBody = sanitizePayloadForModel({
@@ -2065,18 +2077,21 @@ async function lux_ensureAccess() {
         }
       ],
       temperature: 0.18,
-      top_p: 0.72,
-      max_tokens: 130,
-      repetition_penalty: 1.03,
-      reasoning: { effort: "none", exclude: true }
+      top_p: 0.70,
+      max_tokens: 80,
+      repetition_penalty: 1.04
     }, LUX_VISION_FALLBACK_MODEL);
     try {
       const res = await gmPostJSON(api, headers, visionBody, REQUEST_TIMEOUT_MS);
       if (!res || res.status < 200 || res.status >= 300) return "";
-      const notes = parseOpenRouterContent(res.responseText);
-      return luxRemoveCannedPhrases(stripStampsAll(notes || "")).replace(/\s{2,}/g, " ").trim().slice(0, 520);
+      let notes = parseOpenRouterContent(res.responseText);
+      notes = luxRemoveCannedPhrases(stripStampsAll(notes || ""));
+      notes = notes.replace(/\b(?:the image shows|this image shows|in the image|the photo shows|this photo shows|i can see|visible in the image|this is a picture of|the picture shows)\b[:,]?\s*/gi, "");
+      notes = notes.replace(/\b(?:nice vibe|caught my attention|interesting picture|picture you shared|image you sent)\b/gi, "");
+      notes = notes.replace(/\s{2,}/g, " ").replace(/^[,.;:\-\s]+/, "").trim();
+      return notes.slice(0, LUX_MAX_VISION_SUMMARY || 180);
     } catch (e) {
-      console.warn("LUX Grok vision description failed", e);
+      console.warn("LUX Gemini social vision cue failed", e);
       return "";
     }
   }
@@ -2584,14 +2599,14 @@ async function lux_ensureAccess() {
       "X-Title": document.title || "LUX Userscript"
     };
 
-    let grokVisionNotes = "";
+    let socialVisionNotes = "";
     if (latestImage) {
-      grokVisionNotes = await luxDescribeImageWithVision(api, headers, latestImage, rawMsg, leftCard, imageIntent);
+      socialVisionNotes = await luxDescribeImageWithVision(api, headers, latestImage, rawMsg, leftCard, imageIntent);
     }
 
     const mergedImageNotes = [
       imageNotes ? `DOM image notes, ${imageNotes}` : "",
-      grokVisionNotes ? `Grok vision notes for the latest customer image, ${grokVisionNotes}` : ""
+      socialVisionNotes ? `Lightweight social vision cue for the latest customer image, ${socialVisionNotes}` : ""
     ].filter(Boolean).join(" ");
 
     const system = buildSystemPrompt(leftCard, (GM_getValue("lux_persona", "") || "").trim(), mergedImageNotes, imageIntent);
@@ -2600,11 +2615,11 @@ async function lux_ensureAccess() {
     const historyForModel = lux_buildHistoryByTokens(shortHistory, 3000);
 
     // Image flow for every selected text model:
-    // Grok 4.3 reads the latest customer image first, then the currently selected text model writes the final reply from these private notes.
+    // Gemini vision reads the latest customer image first as a short social cue, then the currently selected text model writes the final reply from that cue.
     // This prevents Meta Llama, Hermes, Dolphin, GPT mini, or any other text model from receiving raw image payloads directly.
     const userTextForModel = [
       rawMsg || (latestImage ? "Customer sent a photo." : ""),
-      grokVisionNotes ? `Private visual context from Grok, ${grokVisionNotes}` : ""
+      socialVisionNotes ? `Private social image cue, ${socialVisionNotes}` : ""
     ].filter(Boolean).join("\n");
 
     const userPayload = { role: "user", content: userTextForModel };
