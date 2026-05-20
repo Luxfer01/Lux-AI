@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LUX Starr Framework v13 (OpenRouter • Encrypted Key • Creative Booster • Strict Access • ConeID Gate)
 // @namespace    http://tampermonkey.net/
-// @version      14.6.42
+// @version      14.6.42.1
 // @description  LUX clean Gemini social vision with thumbnail-to-lightbox image resolving, no templates.
 // @match        https://myoperatorservice.com/*
 // @grant        GM_getValue
@@ -194,8 +194,6 @@ async function lux_ensureAccess() {
     "nousresearch/hermes-3-llama-3.1-405b": { temperature: 0.78, top_p: 0.92, repetition_penalty: 1.04, max_tokens: 260, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 67 },
     "openai/gpt-4.1-mini": { temperature: 0.70, top_p: 0.90, repetition_penalty: 1.03, max_tokens: 245, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 29 },
     "openai/gpt-4o-mini": { temperature: 0.76, top_p: 0.92, repetition_penalty: 1.03, max_tokens: 245, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 31 },
-    "x-ai/grok-4.20": { temperature: 0.60, top_p: 0.89, repetition_penalty: 1.05, max_tokens: 240, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 43 },
-    "x-ai/grok-4.3": { temperature: 0.56, top_p: 0.88, repetition_penalty: 1.05, max_tokens: 250, stop: ["\n\nSystem:", "\nUser:", "\nAssistant:"], seed: 47 }
   };
 
   const LUX_SUPPORTED_MODELS = [
@@ -203,8 +201,6 @@ async function lux_ensureAccess() {
     "nousresearch/hermes-3-llama-3.1-405b",
     "openai/gpt-4.1-mini",
     "openai/gpt-4o-mini",
-    "x-ai/grok-4.20",
-    "x-ai/grok-4.3"
   ];
 
   const LUX_VISION_FALLBACK_MODEL = "google/gemini-2.0-flash-exp:free";
@@ -304,7 +300,7 @@ async function lux_ensureAccess() {
 
   function luxSupportsImageInput(modelName) {
     const m = String(modelName || "").toLowerCase();
-    return m === "x-ai/grok-4.3" || m === "x-ai/grok-4" || m === "x-ai/grok-4-fast" || m === "google/gemini-2.0-flash-exp:free";
+    return m === "google/gemini-2.0-flash-exp:free";
   }
 
   function getModelPreset(modelName) {
@@ -1642,12 +1638,6 @@ async function lux_ensureAccess() {
     if ("transforms" in p) delete p.transforms;
     if ("logit_bias" in p && !p.logit_bias) delete p.logit_bias;
 
-    if (m === "x-ai/grok-4.20") {
-      p.reasoning = { enabled: false };
-    } else if (m === "x-ai/grok-4.3") {
-      p.reasoning = { effort: "low", exclude: true };
-    }
-
     if (m.includes("meta-llama/llama-3.3-70b-instruct")) {
       p.temperature = Math.min(Number(p.temperature || 0.82), 0.86);
       p.top_p = Math.min(Number(p.top_p || 0.93), 0.95);
@@ -1831,8 +1821,6 @@ async function lux_ensureAccess() {
     else if (modelName.includes("hermes-3-llama-3.1-405b")) flavor = "Be expressive, emotionally intelligent, intimate, and very human. Use rich but controlled phrasing, natural chemistry, and grounded dialogue without becoming too long.";
     else if (modelName.startsWith("openai/gpt-4.1-mini")) flavor = "Be clean, coherent, grammatically strong, romantic, and emotionally responsive. Do not over-filter adult flirting. Keep sensual tension natural, polished, and human without sounding formal.";
     else if (modelName.startsWith("openai/gpt-4o-mini")) flavor = "Be fast, vivid, warm, observant, playful, and sensual when invited. Do not become neutral or stiff in adult romantic chats. Keep wording simple, natural, and emotionally responsive.";
-    else if (modelName === "x-ai/grok-4.20") flavor = "Be mature, smooth, grounded, quick, emotionally aware, and naturally feminine. Keep replies clear, warm, precise, and human.";
-    else if (modelName === "x-ai/grok-4.3") flavor = "Be thoughtful, emotionally precise, mature, and smooth. Use clean natural wording, avoid overthinking, and keep the chat intimate and human.";
 
     const customBlock = customSystem && customSystem.trim()
       ? ` Custom persona priority layer, this controls LUX's voice, personality, backstory, speech rhythm, emotional style, sensual style, hobbies, job details, and how she should feel in conversation. Follow it strongly unless it conflicts with safety, anti-meet, contact, address, or latest-message rules. ${customSystem.trim()}`
@@ -2941,8 +2929,6 @@ async function lux_ensureAccess() {
     "nousresearch/hermes-3-llama-3.1-405b",
     "openai/gpt-4.1-mini",
     "openai/gpt-4o-mini",
-    "x-ai/grok-4.20",
-    "x-ai/grok-4.3"
   ];
 
   let LUXSettingsDirty = false;
